@@ -35,8 +35,8 @@ type ndjsonManifestStore struct {
 	tmpFile   *os.File
 	gzWriter  *gzip.Writer
 	jsonEnc   *json.Encoder
-	mac       hash.Hash     // reused HMAC instance, Reset() between entries
-	canonBuf  bytes.Buffer  // reused canonical-encoding scratch buffer
+	mac       hash.Hash    // reused HMAC instance, Reset() between entries
+	canonBuf  bytes.Buffer // reused canonical-encoding scratch buffer
 	open      bool
 	finalized bool
 }
