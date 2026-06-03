@@ -1,0 +1,18 @@
+run:
+  timeout: 5m
+  go: '1.22'
+
+linters:
+  enable:
+    - errcheck
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  gosec:
+    excludes:
+      - G304  # File path provided as taint input (we control source paths)
