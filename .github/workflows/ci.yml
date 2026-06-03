@@ -20,6 +20,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: Install golangci-lint
         run: |
           VERSION=$(cat scripts/golangci-version.txt)
@@ -47,6 +49,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: e2e-fast (PR-gating)
         run: make e2e-fast
 
@@ -64,6 +68,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: e2e-safety (faultinject + hdiutil)
         run: make e2e-safety
 

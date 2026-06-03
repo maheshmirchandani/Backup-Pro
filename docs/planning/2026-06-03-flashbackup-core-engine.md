@@ -655,17 +655,20 @@ bench-baseline:
 	go test -bench=. -benchmem -count=5 ./internal/hash ./internal/state ./internal/runner | tee testdata/benchmarks-baseline.txt
 
 # Per-package coverage gates: runner/state/hash/preflight >=80% line per invariant #42
+# Use trailing slash anchor to avoid substring matches (e.g., internal/state vs internal/statemachine)
 coverage:
 	go test -coverprofile=coverage.out -covermode=atomic ./internal/runner/... ./internal/hash/... ./internal/state/... ./internal/preflight/...
 	@for pkg in runner hash state preflight; do \
-		pct=$$(go tool cover -func=coverage.out | grep "internal/$$pkg" | awk '{sum+=$$3+0;n+=1} END {if(n>0)printf "%.1f",sum/n;else print "0"}'); \
+		pct=$$(go tool cover -func=coverage.out | grep -E "internal/$$pkg(/|\.go:)" | awk '{sum+=$$3+0;n+=1} END {if(n>0)printf "%.1f",sum/n;else print "0"}'); \
 		echo "$$pkg coverage: $$pct%"; \
 		awk -v p=$$pct 'BEGIN{if(p+0 < 80){exit 1}}' || { echo "FAIL: $$pkg below 80%"; exit 1; }; \
 	done
 
 # Release-gate symbol-scan per invariant #35: assert no faultinject hooks leak into release build
+# Anchor the regex with word-boundary-like prefix to avoid false positives on legitimate
+# names containing the substring "Inject" (e.g., a future DI helper).
 verify-release: build
-	@if go tool nm flashbackup | grep -Ei 'faultinject|Inject' >/dev/null 2>&1; then \
+	@if go tool nm flashbackup | grep -E '(^|[._/])faultinject' >/dev/null 2>&1; then \
 		echo "FAIL: faultinject symbols found in release binary"; exit 1; \
 	fi
 	@echo "OK: release binary clean of faultinject symbols"
@@ -680,7 +683,12 @@ debug-bundle:
 	@echo "wrote flashbackup-debug-$(RUN).tgz"
 
 lint:
-	gofmt -s -d .
+	@unfmt=$$(gofmt -s -l . 2>/dev/null); \
+		if [ -n "$$unfmt" ]; then \
+			echo "FAIL: unformatted files (run 'gofmt -s -w .'):"; \
+			echo "$$unfmt"; \
+			exit 1; \
+		fi
 	go vet ./...
 	golangci-lint run
 
@@ -749,6 +757,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: Install golangci-lint
         run: |
           VERSION=$(cat scripts/golangci-version.txt)
@@ -776,6 +786,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: e2e-fast (PR-gating)
         run: make e2e-fast
 
@@ -793,6 +805,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: e2e-safety (faultinject + hdiutil)
         run: make e2e-safety
 
