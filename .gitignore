@@ -1,0 +1,30 @@
+# Binaries
+flashbackup
+flashbackup-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build / test artifacts
+*.test
+*.out
+*.prof
+coverage.out
+dist/
+testdata/benchmarks-*.txt
+
+# Local config
+.env
+.env.local
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Brainstorm + planning artifacts (not source of truth)
+.superpowers/
+
+# macOS Finder
+.DS_Store
