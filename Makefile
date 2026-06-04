@@ -5,17 +5,27 @@ export SOURCE_DATE_EPOCH
 
 GOFLAGS := -trimpath -buildvcs=false
 
-# LDFLAGS for release builds: strip symbols, strip buildid, and flip the
+# LDFLAGS for release builds: strip DWARF (smaller binary), strip buildid for
+# reproducibility, KEEP the Go symbol table so the verify-release gate
+# (invariant #35) can scan it with `go tool nm`, and flip the
 # codesign.IsReleaseBuild string var to "true" so the per-launch codesign
 # self-verify gate runs against the on-disk binary (spec invariant #29 /
-# Task 18). Dev builds (go run, go test, plain go build) leave IsReleaseBuild
-# at its compile-time default of "false" and skip the gate.
-LDFLAGS_RELEASE := -s -w -buildid= -X github.com/maheshmirchandani/Backup-Pro/internal/preflight/codesign.IsReleaseBuild=true
+# Task 18). Dev builds (go run, go test, plain go build) leave
+# IsReleaseBuild at its compile-time default of "false" and skip the gate.
+#
+# We intentionally do NOT pass -s (which would strip the Go symbol table).
+# Task 28 review (2026-06-04) caught that -s -w made the nm-based symbol
+# scan a no-op: nm returns ~58 libc symbols and nothing else, so any
+# faultinject leak would be invisible. Keeping the symbol table costs ~1MB
+# in binary size; we treat that as the cost of having a working release
+# gate.
+LDFLAGS_RELEASE := -w -buildid= -X github.com/maheshmirchandani/Backup-Pro/internal/preflight/codesign.IsReleaseBuild=true
 
-# LDFLAGS for the faultinject build: same symbol/buildid stripping as release
-# but IsReleaseBuild stays "false" so codesign isn't invoked against an
-# unsigned faultinject artifact during fault-injection e2e runs.
-LDFLAGS_FAULTINJECT := -s -w -buildid=
+# LDFLAGS for the faultinject build: matches release flag policy (strip
+# DWARF, keep symbols) so the build artifact has the same symbol
+# visibility as a release binary. IsReleaseBuild stays "false" so codesign
+# isn't invoked against an unsigned faultinject artifact during e2e runs.
+LDFLAGS_FAULTINJECT := -w -buildid=
 
 build:
 	@if [ -d ./cmd/flashbackup ]; then \

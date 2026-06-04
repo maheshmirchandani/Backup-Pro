@@ -396,6 +396,8 @@ Examples:
 
 Multiple `--inject` flags allowed; applied in order.
 
+**Canonical phase wire strings:** `T1-pre`, `T1`, `T1-post`, `T2-pre`, `T2`, `T3-pre`, `T3`. Defined as `Point` constants in `internal/runner/faultinject.go` (Task 28); matching against `HookArgs.Phase` is plain string equality. Any new hook site must use an existing constant or extend the table here AND the constant set in the same change (drift trap). The DSL's `phase=` keyword is grammar-agnostic about the value; the canonical set documents what is actually wired into the runner code so e2e tests in Tasks 48-51b can rely on it. Added 2026-06-04 per Task 28 review.
+
 ### `flashbackup status --json` schema (locked)
 
 ```json

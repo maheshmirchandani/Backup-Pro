@@ -149,6 +149,11 @@ func Parse(specs []string) ([]Fault, error) {
 }
 
 func parseOne(spec string) (Fault, error) {
+	// Split on ':'. macOS APFS/HFS+ paths cannot contain ':' (it is the
+	// legacy HFS path separator and Finder rejects it), so the file=<path>
+	// value is safe under this split. If FlashBackup ever supports
+	// alternate filesystems where ':' is legal in filenames, this parser
+	// needs a more careful tokenizer.
 	parts := strings.Split(spec, ":")
 	if len(parts) < 2 {
 		return Fault{}, &ErrInvalidSpec{Spec: spec, Reason: "must be action:key=value[:key=value...]"}

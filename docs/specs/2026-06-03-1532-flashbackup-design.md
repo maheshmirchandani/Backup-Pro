@@ -469,10 +469,10 @@ GitHub Actions workflow triggered on tag push (`v0.1.0`). Runs on `macos-latest`
 
 | Binary | How built |
 |---|---|
-| `flashbackup` | `go build -trimpath -ldflags "-s -w -buildid=" -tags release` per arch, then `lipo -create`. |
+| `flashbackup` | `go build -trimpath -ldflags "-w -buildid=" -tags release` per arch, then `lipo -create`. |
 | `rsync` (embedded) | Build GNU rsync 3.x from pinned source per arch, then `lipo -create`. Build script: `scripts/build-rsync.sh`. |
 
-Build flags rationale: `-trimpath` + `-buildid=` for reproducibility; `-s -w` to strip symbols; `-tags release` excludes `faultinject` hooks (locked invariant #20).
+Build flags rationale: `-trimpath` + `-buildid=` for reproducibility; `-w` to strip DWARF debug info; **the `-s` flag is intentionally NOT passed** so the Go symbol table survives for the invariant #35 release gate to scan via `go tool nm`. Stripping the symbol table would defeat the release gate (Task 28 review, 2026-06-04). `-tags release` excludes `faultinject` hooks (locked invariant #20).
 
 rsync binary is embedded via Go's `embed.FS`. SHA256 of embedded rsync is recorded in build-time constant for verification at extraction.
 
@@ -957,7 +957,7 @@ Items raised in review but consciously deferred. Recorded so they aren't lost.
 | 32 | All paths canonicalized to NFC before manifest write and lookup; reject duplicate normalized paths at selection time. | Security hat |
 | 33 | Manifest lines carry a keyed integrity checksum (HMAC-SHA256, per-USB key in `version.json`). Sufficient to detect accidental corruption, bit-rot, and bugs in our own writer. **Not** a defense against an adversary with USB write access (such an attacker can rewrite both the manifest and the key); see SECURITY.md threat model. Canonical encoding is length-prefixed, not pipe-separated. | Integrity check (rewritten 2026-06-03 after Plan 1 multi-hat review caught pipe-separator forgeability and overstated authentication claim) |
 | 34 | Mandatory minisign signature on `SHA256SUMS`; public key in README and on maintainer site (out-of-band distribution). | Security + SRE hats |
-| 35 | CI release gate: symbol-scan signed release binary for `faultinject` symbols; fail build on hit. | QA hat |
+| 35 | CI release gate: symbol-scan signed release binary for `faultinject` symbols; fail build on hit. Gate implementation: `go tool nm <binary> \| grep -E '(^\|[._/])faultinject'`. Build flags MUST preserve the Go symbol table (omit `-s` from `-ldflags`; `-w` is fine) so `nm` can read it. The release stub's `ErrFaultinjectStripped` sentinel uses mixed-case `Errfaultinject` prefix that does not match the lowercase regex, by design. | QA hat (refined 2026-06-04 after Task 28 review) |
 | 36 | Every Go source file carries `SPDX-License-Identifier: GPL-3.0-or-later`; `LICENSE` file at repo root. | OSS hat |
 | 37 | Release CI fails if `go-licenses` reports any non-GPL-3-compatible license among Go deps. | OSS hat |
 | 38 | Embedded rsync source pin tracked by Renovate/Dependabot; security patches integrated within 30 days of upstream release. | OSS + SRE hats |
