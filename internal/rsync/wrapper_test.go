@@ -117,6 +117,32 @@ func TestFileListBytes_NULTerminated(t *testing.T) {
 	}
 }
 
+// TestFileListBytes_DoubleDashPrefixSurvives is the canonical argv-injection
+// defense per the multi-hat Hacker amendment 2026-06-03: a filename starting
+// with `--` must reach rsync intact via stdin (--files-from=-) and MUST NOT
+// leak into argv. The stdin-piped file list is the ONLY surface where rsync
+// sees a `--rsh=evil` or `-Pfoo` form; argv never does. This test pins the
+// containment.
+func TestFileListBytes_DoubleDashPrefixSurvives(t *testing.T) {
+	malicious := []string{"--rsh=ssh evil-host", "-Pfoo", "--inplace", "normal.txt"}
+	opts := Options{Files: malicious}
+	got := fileListBytes(opts)
+	want := []byte("--rsh=ssh evil-host\x00-Pfoo\x00--inplace\x00normal.txt\x00")
+	if !bytes.Equal(got, want) {
+		t.Errorf("malicious filename roundtrip lost; got %q want %q", got, want)
+	}
+
+	// Also assert that buildArgs never reproduces ANY filename from Files in argv.
+	args := buildArgs(opts)
+	for _, arg := range args {
+		for _, f := range malicious {
+			if arg == f {
+				t.Errorf("argv leaked filename %q (would be interpreted as rsync flag): full argv=%q", f, args)
+			}
+		}
+	}
+}
+
 func TestFileListBytes_Empty(t *testing.T) {
 	got := fileListBytes(Options{})
 	if len(got) != 0 {

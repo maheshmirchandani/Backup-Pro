@@ -53,7 +53,7 @@ type Options struct {
 
 	// Delete enables --delete (mirror mode: remove destination files absent
 	// from source). Caller must restrict to FB-written paths per spec
-	// invariant #6 — that is the caller's job, not this wrapper's.
+	// invariant #6; that is the caller's job, not this wrapper's.
 	Delete bool
 
 	// Stdout, Stderr receive the rsync subprocess's stdout/stderr. If nil,
