@@ -227,7 +227,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 	// the manifest could not be sealed).
 	if err := in.ManifestStore.Gzip(ctx); err != nil {
 		wrapped := fmt.Errorf("runner T4: gzip manifest: %w", err)
-		t5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
 		return nil, wrapped
 	}
 
@@ -255,7 +255,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 		// Audit just failed; do NOT re-Append phase_aborted to the same
 		// store (matches the Task 22-26 compound-error guard). Tell the
 		// renderer and best-effort Checkpoint.
-		t5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, startedAt, wrapped)
 		return nil, wrapped
 	}
 
@@ -281,7 +281,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 		ExitStatus:                    in.ExitStatus,
 	}); err != nil {
 		wrapped := fmt.Errorf("runner T4: append finished line: %w", err)
-		t5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
 		return nil, wrapped
 	}
 
@@ -289,7 +289,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 	// panic / power loss. Two-line model invariant #10 durability.
 	if err := in.RunLogStore.Checkpoint(ctx); err != nil {
 		wrapped := fmt.Errorf("runner T4: checkpoint runlog: %w", err)
-		t5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
 		return nil, wrapped
 	}
 
@@ -311,7 +311,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 		},
 	}); err != nil {
 		wrapped := fmt.Errorf("runner T4: append phase_completed: %w", err)
-		t5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, startedAt, wrapped)
 		return nil, wrapped
 	}
 	emitUI(ctx, in.UIRenderer, types.UIEvent{
@@ -338,7 +338,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 		// "finished" line IS already durable (Checkpoint above), so the
 		// next preflight sees the run as cleanly finished; the audit
 		// log will simply lack the terminal run_finished line.
-		t5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		runT5AbortOnAuditFail(ctx, in.EventStore, in.UIRenderer, startedAt, wrapped)
 		return nil, wrapped
 	}
 
@@ -439,17 +439,17 @@ func pruneOldRunDirs(dotDir, currentRunID string, retentionLimit int) []string {
 	return pruned
 }
 
-// t5Abort centralizes the phase_aborted path for non-audit-store fatal
+// runT5Abort centralizes the phase_aborted path for non-audit-store fatal
 // branches (Gzip failure, AppendFinished failure, runlog Checkpoint
 // failure). Shape mirrors runT1Abort / runT4Abort: best-effort Append
 // under the shared 5-second audit budget; emit UIEvtPhaseCompleted
 // (aborted); Checkpoint best-effort.
 //
-// Callers must NOT invoke t5Abort when the audit store itself just failed
+// Callers must NOT invoke runT5Abort when the audit store itself just failed
 // (Appending phase_aborted to a just-failed store would likely fail too,
-// masking the original error). Those branches use t5AbortOnAuditFail
+// masking the original error). Those branches use runT5AbortOnAuditFail
 // below, which skips the Append and only notifies the renderer.
-func t5Abort(ctx context.Context, es state.EventStore, ui types.Renderer,
+func runT5Abort(ctx context.Context, es state.EventStore, ui types.Renderer,
 	phaseWire string, startedAt time.Time, wrappedErr error) {
 	finishedAt := time.Now().UTC()
 	durationMS := finishedAt.Sub(startedAt).Milliseconds()
@@ -479,13 +479,15 @@ func t5Abort(ctx context.Context, es state.EventStore, ui types.Renderer,
 	_ = es.Checkpoint(auditCtx)
 }
 
-// t5AbortOnAuditFail is the abort path used when the EventStore itself
+// runT5AbortOnAuditFail is the abort path used when the EventStore itself
 // just failed an Append. It skips the phase_aborted Append (since the
 // store is the failure mode) and only notifies the renderer + best-effort
 // Checkpoint. Matches the Task 22-26 compound-error guard.
-func t5AbortOnAuditFail(ctx context.Context, es state.EventStore, ui types.Renderer,
-	phaseWire string, startedAt time.Time, wrappedErr error) {
-	_ = phaseWire // kept for signature parity with t5Abort
+func runT5AbortOnAuditFail(ctx context.Context, es state.EventStore, ui types.Renderer,
+	_ time.Time, wrappedErr error) {
+	// startedAt parameter dropped via _ blank identifier; kept in the
+	// signature for caller-side symmetry with runT5Abort (both helpers
+	// share the same call shape from the inline error branches).
 	finishedAt := time.Now().UTC()
 
 	emitUI(ctx, ui, types.UIEvent{
