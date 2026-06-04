@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night session, after Task 29 + Task 28 review fixes)
+## Project status (2026-06-04 night session, after Tasks 29-30 + their review fixes)
 
-**Phase:** Plan 1 execution. Tasks 1-29 complete. CI green at `8461b0f`. RUNNER PACKAGE COMPLETE end-to-end: T0 through T4 phases, fault-injection harness, top-level `runner.Run` orchestrator with signal handling and atomic gate decision. Next: Task 30 (`internal/verify/load` manifest reader).
+**Phase:** Plan 1 execution. Tasks 1-30 complete. CI green at `06a4255`. RUNNER PACKAGE COMPLETE; verify-side started with `internal/verify/load`. Next: Task 31 (`internal/verify/rehash`) + Task 30 review in overlap.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -28,7 +28,7 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 **Latest CI green:** confirmed after fix for gosec G306 (commit `f0cf05c`). Per-package coverage real: hash 84.6%, state 83.0%, profiles 81.9%, drives 85.3% (all above 80% gate).
 
-**Tasks complete (29/58):**
+**Tasks complete (30/58):**
 1. Bootstrap (manual): git init, GPLv3, conventions, GitHub Releases-ready
 2. Makefile + golangci-lint + CI workflow (+ 4 code-review fixes + 4 Makefile-guard fixes + coverage-gate correctness fix + gosec G306 test-fixture fix)
 3. `internal/paths` namespace prefix (3 tests)
@@ -84,6 +84,28 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (later night): Task 30 (verify/load) + Task 29 review fixes
+
+Task 30 (`internal/verify/load`) dispatched in parallel with the Task 29 spec+quality review. The package reads the per-run gzipped manifest, verifies each entry's HMAC inline against the per-USB key loaded via `state.ReadVersionFile` (fail-closed; no init), and returns `(Entries, IntegrityErrors, SchemaErrors)`. Tampered entries surface as IntegrityErrors per PS1 / AC-19, not silent skip; per-line errors don't abort the load; pipeline errors (file open, gzip read, version-file fail-closed) DO abort with wrapped errors.
+
+Implementer commit `14f73e0`; 14+ tests covering happy path, tampered entry (AC-19 path), bad JSON line, wrong schema_version, missing manifest, missing/corrupt version file, empty manifest, cancel mid-stream, HMAC canonical encoding edge cases (pipe-collision twins, UTF-8, large size, empty fields, 1000-char path), pipe-separator-forgery regression for invariant #33, missing HMAC field, empty paths, cancellation at boundary, non-gzip input, empty-line tolerance. New `internal/verify/load` package coverage 87.7%. All four CI jobs green first try.
+
+No helpers exported from `internal/state`: the loader reuses `state.VerifyHMAC(entry, key)` which itself uses the same length-prefixed canonical helper as the writer. Single source of truth for the HMAC encoding preserved per invariant #33. Per-entry V mismatch (a structural corruption since the writer always uses V=1) aborts with pipeline error rather than landing in SchemaErrors. Missing-HMAC line surfaces as a SchemaError (scoped per-line); a missing-HMAC field IS the writer's signature, so its absence implies the line wasn't produced by an authorized writer.
+
+Task 29 spec+quality review (against commit `da24cd1`) surfaced four important findings, all applied inline in commit `06a4255`:
+
+1. **atomic_gate_blocked event silenced by runner short-circuit**: runner.go was returning before invoking RunT4DeleteSource when the gate would close, killing the central forensic signal of invariant #1. T4 already had the emission path via `t4FinishGateBlocked`. Fix: always call RunT4DeleteSource in move mode; the phase short-circuits before any unlink so no source is touched either way. Run-level ExitStatus still distinguishes the gated path.
+2. **Namespace prefix duplicated logic**: runner.go did `filepath.Join(destAbs, fmt.Sprintf("%s-%s", pc.Hostname, pc.Username))` instead of calling `paths.Prefix(...)`. Silent divergence bug on hosts with dots in hostname (e.g., `macbook.local` → runner wrote to `macbook.local-mahesh/` while verify/status/etc. computed `macbook-local-mahesh/`). Fix: import `internal/paths` and use `paths.Prefix`. Single source of truth restored per invariant #15.
+3. **T1 hook phase strings all "T1"**: the three T1 fault-injection sites passed `HookArgs.Phase = string(types.PhaseTransfer)` (= "T1") to PreRsync, Progress, AND Post. The Task 28 review plan amendment explicitly locked the canonical phase wire strings as `T1-pre` / `T1` / `T1-post` so e2e tests could selectively target each. Drift trap surfaced immediately. Fix: pass `string(PointT1PreRsync)` / `PointT1Progress` / `PointT1Post` to the three sites.
+4. **Support-bundle path list never propagated**: Task 29 brief required `T2Result.RsyncLogPath + T4Result.DeletionLogPath` flow through to `RunResult` and runs.ndjson "finished" line. Original impl discarded T2Result entirely. Fix: added `SupportPaths []string` field to `types.RunResult`, `state.FinishedRun` (json `support_paths,omitempty`), and `T5Input`. Runner captures both paths after their phases (including on T2 failure path so forensic data lands even on aborted runs).
+
+Task 29 review also surfaced minor findings logged for future polish but not blocking:
+- Deferred `ms.Gzip(context.Background())` on early-abort paths finalizes a `.gz` for a run that never reached T5. The missing runs.ndjson "finished" line is the authoritative orphan signal, so technically not a bug, but a forensic reader who sees a `.gz` without a finished line may briefly be confused. Acceptable; current comment is candid.
+- `SkipCodesign` flag on T0Input not threaded from RunOptions. Dead until cmd/main wants a `--skip-codesign-for-test` escape hatch. Worth a TODO; not blocking.
+- `emitPreflightFailedSummary` reads slightly awkwardly. Functionally correct.
+
+Task 30 + Task 29 review-fix commits this segment: `14f73e0` (Task 30 impl), `06a4255` (Task 29 review fixes).
 
 ### 2026-06-04 (later night): Task 28 review fixes + Task 29 (runner.Run state machine)
 
