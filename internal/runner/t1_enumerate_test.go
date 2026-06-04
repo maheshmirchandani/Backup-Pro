@@ -475,7 +475,7 @@ func TestRunT1Enumerate_CancelledMidEnumeration(t *testing.T) {
 		}
 	}
 
-	es, _ := makeT1EventStore(t)
+	es, eventsPath := makeT1EventStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -502,9 +502,29 @@ func TestRunT1Enumerate_CancelledMidEnumeration(t *testing.T) {
 
 	// We do NOT assert on the exact number of file_enumerated lines
 	// because the cadenced check happens every 256 entries (not every
-	// entry), so between 256 and 511 are valid landed counts. We DO
-	// assert that phase_completed is absent (the phase was aborted, not
-	// completed) and that phase_aborted is present.
+	// entry), so between 256 and 511 are valid landed counts.
+	//
+	// We DO assert phase_completed is absent: the phase was not completed.
+	//
+	// We do NOT assert phase_aborted is present. The runner has two
+	// abort-on-cancellation paths:
+	//   (a) Cadenced ctx-check at i%256==0 -> runT1Abort -> phase_aborted
+	//       emitted under a fresh 5s background ctx.
+	//   (b) Next EventStore.Append after cancellation returns ctx.Err
+	//       from the NDJSON store's own entry guard -> mid-stream
+	//       audit-failure branch, which intentionally SKIPS emitting
+	//       phase_aborted (rationale: the audit store just signalled
+	//       failure; re-Appending may compound the problem).
+	// Which path wins depends on whether cancellation lands inside the
+	// cadenced-check window or between two Append calls; both are
+	// correct runner behavior. The only invariant the user observes is
+	// "the run was not completed" + an error return.
+	events := readNDJSON(t, eventsPath)
+	for _, ev := range events {
+		if ev["kind"] == "phase_completed" {
+			t.Error("phase_completed should be absent on mid-enumeration cancellation")
+		}
+	}
 }
 
 func TestRunT1Enumerate_RendererErrorIsNonFatal(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 // ctx.Err(). 256 is a starting point chosen so that a 1M-file tree polls
 // ~4K times during enumeration (each emit is bounded by an Append fsync
 // budget); tune if observed emission rate makes this either too coarse
-// or too chatty. Exported via the const for test visibility.
+// or too chatty. Made a named const (not a magic number) for test visibility.
 const t1EnumerateCtxCheckInterval = 256
 
 // T1Input is the minimal config the T0+ enumerate phase needs from the
@@ -86,7 +86,7 @@ type T1Result struct {
 //     Checkpoint best-effort (shared 5s budget if ctx cancelled);
 //     wrapped error returned, T1Result nil.
 //  6. On Walk SUCCESS: build Signatures map from Candidates, emit one
-//     file_enumerated event per Candidate (audit-only; no UIEvent — the
+//     file_enumerated event per Candidate (audit-only; no UIEvent. The
 //     v0.1 UIEvent kinds do not include enumeration progress), then
 //     phase_completed + UIEvtPhaseCompleted (Status="ok") + Checkpoint
 //     + return T1Result, nil.
@@ -105,7 +105,7 @@ type T1Result struct {
 // file_enumerated, phase_completed, phase_aborted) aborts the run with a
 // wrapped error. Per the Task 22 contract: audit failures are fatal because
 // we cannot guarantee the run is observable. file_enumerated failures stop
-// emission mid-stream — events.ndjson holds whatever landed before the
+// emission mid-stream; events.ndjson holds whatever landed before the
 // failure (truthful partial-progress data), the run does NOT emit
 // phase_completed (we cannot lie that the phase finished), and no
 // downstream phase will run.
