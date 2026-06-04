@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04, end of resume session)
+## Project status (2026-06-04, end of resume session + Task 22 + cleanup)
 
-**Phase:** Plan 1 execution. Tasks 1-21 complete + reviewed + applied. CI green. Latest commit: `b17dc22 fix(coverage): tree-weighted gate; handle no-statement packages`.
+**Phase:** Plan 1 execution. Tasks 1-22 complete + reviewed + applied. Task 22a queued. Both deferred follow-ups closed (spec invariant #11; lock subpackage coverage). CI green. Latest commit: `4403db8 test(preflight/lock): close coverage gap to 80.5%`.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -84,6 +84,20 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (later): Task 22 + cleanup of two deferred follow-ups
+
+After the CI-rescue + Task 21 work, dispatched Task 22 (`internal/runner/t0_preflight.go`) per the revised dispatch protocol (implementer runs `go vet && make lint && go test -race && make coverage` locally before commit). Implementer reported runner package at 89.8% coverage with 12 tests; review classified as minor-fixes-needed with no critical or important code-level issues; two important plan-level drifts surfaced.
+
+Cleaned up both deferred follow-ups MM had asked when they'd be done:
+
+1. **Spec invariant #11** (commit `bde644f`): patched from pre-refinement "assume current, warn, rewrite" to the locked FAIL-CLOSED behavior matching `internal/state/version.go`. Cited the Plan 1 multi-hat security review as the source of the refinement.
+2. **Spec section 3 row T0 / T0+** (commit `76bb66f`): reconciled the "started line ownership" drift in favor of T0 (matches plan + code). Updated both T0 row (now lists all preflight gates by invariant + explicit "started line at end of T0 success") and T0+ row (started-line moved out; on-crash text references `crashed_resumed` orphan finalization).
+3. **Lock subpackage coverage** (commit `4403db8`): added 4 targeted tests (`TestRelease_AfterExternalUnlink`, `TestFallbackHostname`, `TestProcessStartTimeUnix_DeadPID`, `TestAcquire_ParentDirMissing`). 75.4% → 80.5%; preflight tree 83.0% → 84.6%. Remaining sub-80% spots (`finishAcquire`, `Release` switch branches) need DI for failure injection; deferred to a future testutil pass.
+
+Task 22 review also surfaced 5 unowned T0-domain event Kinds in the canonical Event Kinds table (`lock_acquired`, `lock_stale_detected`, `lock_contention`, `filesystem_refused`, `volume_uuid_changed`). Queued as Task 22a (commit `edaf193`); design option (b) selected: keep preflight gates pure, extend `PreflightContext` with snapshots + typed errors, runner translates to events post-hoc.
+
+Commits this segment (in order): `b31e271` (Task 22 impl), `bde644f` (spec #11), `1b10454` (Task 22 review fixes), `76bb66f` (spec section 3), `edaf193` (plan: Task 22a), `4403db8` (lock tests).
 
 ### 2026-06-04: Resume session - Tasks 19, 20 reviewed + Task 21 implemented + CI rescue
 
