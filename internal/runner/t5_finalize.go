@@ -96,6 +96,11 @@ type T5Input struct {
 	BytesTotal                    int64
 	DeletionsSkippedDueToMutation int
 
+	// SupportPaths is the runner-aggregated forensic-file list (rsync log
+	// from T1, deletion log from T3). Written into FinishedRun.SupportPaths
+	// for the support-bundle generator (Task 34+). May be nil.
+	SupportPaths []string
+
 	// ManifestStore is the per-run manifest sink opened by the top-level
 	// runner. This phase calls Gzip() exactly once to finalize the .gz
 	// file (flush gzip trailer, fsync, atomic rename .tmp.gz -> .gz,
@@ -279,6 +284,7 @@ func RunT5Finalize(ctx context.Context, in T5Input) (*T5Result, error) {
 		BytesTotal:                    in.BytesTotal,
 		DeletionsSkippedDueToMutation: in.DeletionsSkippedDueToMutation,
 		ExitStatus:                    in.ExitStatus,
+		SupportPaths:                  in.SupportPaths,
 	}); err != nil {
 		wrapped := fmt.Errorf("runner T4: append finished line: %w", err)
 		runT5Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)

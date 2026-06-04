@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/maheshmirchandani/Backup-Pro/internal/paths"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 	"github.com/maheshmirchandani/Backup-Pro/internal/selection"
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
@@ -187,8 +188,11 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 
 	// Namespaced destination subdirectory per invariant #14:
 	//   <DestRoot>/<hostname>-<username>/<file>
-	// rsync writes here; T2 reads back from here.
-	namespacedDest := filepath.Join(destAbs, fmt.Sprintf("%s-%s", pc.Hostname, pc.Username))
+	// Use the canonical paths.Prefix helper (strips dots and other special
+	// chars so hostnames like "macbook.local" do not silently diverge from
+	// what status/verify compute from the same inputs). Single source of
+	// truth per invariant #15.
+	namespacedDest := filepath.Join(destAbs, paths.Prefix(pc.Hostname, pc.Username))
 	if err := os.MkdirAll(namespacedDest, 0o700); err != nil {
 		return result, fmt.Errorf("runner Run: mkdir namespaced dest: %w", err)
 	}
@@ -224,7 +228,7 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 		emitSummary(ctx, opts.UIRenderer, result)
 		return result, fmt.Errorf("runner Run: pre-T1 verify: %w", err)
 	}
-	_, err = RunT2Transfer(ctx, T2Input{
+	t2res, err := RunT2Transfer(ctx, T2Input{
 		SourceRoot: sourceRoot,
 		DestRoot:   namespacedDest,
 		RsyncPath:  pc.RsyncPath,
@@ -236,9 +240,15 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 		UIRenderer: opts.UIRenderer,
 	})
 	if err != nil {
+		if t2res != nil && t2res.RsyncLogPath != "" {
+			result.SupportPaths = append(result.SupportPaths, t2res.RsyncLogPath)
+		}
 		result.FinishedAt = time.Now().UTC()
 		emitSummary(ctx, opts.UIRenderer, result)
 		return result, err
+	}
+	if t2res != nil && t2res.RsyncLogPath != "" {
+		result.SupportPaths = append(result.SupportPaths, t2res.RsyncLogPath)
 	}
 
 	// 9. T2 hash + compare + classify.
@@ -266,47 +276,47 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 	result.FilesSucceeded = t3res.FilesVerified
 	result.FilesFailed = t3res.FilesTotal - t3res.FilesVerified
 
-	// 10. T3 delete-source (move mode only; copy mode runs the phase but the
-	// phase body short-circuits on copy). The atomic gate decision lives in
-	// the runner: when the gate would close, we set ExitStatus and skip the
-	// phase entirely so no source is touched. T4 (delete) accepts both modes
-	// but we only enter it when (mode==move AND gate open) OR (mode==copy).
+	// 10. T3 delete-source. Always invoke RunT4DeleteSource regardless of
+	// gate state so the forensic atomic_gate_blocked event lands in
+	// events.ndjson when the gate fires (per the canonical Event Kinds
+	// table in the master plan; the phase emits gate_blocked via
+	// t4FinishGateBlocked). The phase body itself short-circuits before
+	// any unlink on copy mode or on a closed gate, so no source is
+	// touched in either branch.
 	gateOpen := t3res.FilesVerified == t3res.FilesTotal
-	skipT4Delete := opts.Mode == types.ModeMove && !gateOpen
-	if skipT4Delete {
-		// Atomic gate closed under move mode. Per invariant #1: do NOT call
-		// RunT4DeleteSource at all (it would short-circuit on the gate, but
-		// suppressing the call is also clearer in the audit trail because
-		// the user sees "no T3 phase ever ran" rather than "T3 ran and
-		// blocked"). The phase-level abort is on the runner, not on the
-		// phase function.
+	if err := pc.VerifyVolumeUnchanged(ctx); err != nil {
+		result.FinishedAt = time.Now().UTC()
+		emitSummary(ctx, opts.UIRenderer, result)
+		return result, fmt.Errorf("runner Run: pre-T3 verify: %w", err)
+	}
+	assertVerifiedSubsetCovered(t1.Candidates, t1.Signatures, t3res.PerFileStatus)
+	t4res, err := RunT4DeleteSource(ctx, T4Input{
+		SourceRoot: sourceRoot,
+		Candidates: t1.Candidates,
+		Signatures: t1.Signatures,
+		Mode:       opts.Mode,
+		T3Result:   t3res,
+		DotDir:     pc.DotDir,
+		RunID:      result.RunID,
+		EventStore: es,
+		UIRenderer: opts.UIRenderer,
+	})
+	if err != nil {
+		result.FinishedAt = time.Now().UTC()
+		emitSummary(ctx, opts.UIRenderer, result)
+		return result, err
+	}
+	if t4res != nil {
+		result.DeletionsSkippedDueToMutation = t4res.FilesSkippedMutated
+		if t4res.DeletionLogPath != "" {
+			result.SupportPaths = append(result.SupportPaths, t4res.DeletionLogPath)
+		}
+	}
+	if opts.Mode == types.ModeMove && !gateOpen {
+		// Atomic gate closed under move mode. T4 emitted atomic_gate_blocked
+		// already; runner records the run-level ExitStatus that distinguishes
+		// the gated path from a clean run.
 		result.ExitStatus = types.ExitStatusCopyOnlyAbortedDelete
-	} else {
-		if err := pc.VerifyVolumeUnchanged(ctx); err != nil {
-			result.FinishedAt = time.Now().UTC()
-			emitSummary(ctx, opts.UIRenderer, result)
-			return result, fmt.Errorf("runner Run: pre-T3 verify: %w", err)
-		}
-		assertVerifiedSubsetCovered(t1.Candidates, t1.Signatures, t3res.PerFileStatus)
-		t4res, err := RunT4DeleteSource(ctx, T4Input{
-			SourceRoot: sourceRoot,
-			Candidates: t1.Candidates,
-			Signatures: t1.Signatures,
-			Mode:       opts.Mode,
-			T3Result:   t3res,
-			DotDir:     pc.DotDir,
-			RunID:      result.RunID,
-			EventStore: es,
-			UIRenderer: opts.UIRenderer,
-		})
-		if err != nil {
-			result.FinishedAt = time.Now().UTC()
-			emitSummary(ctx, opts.UIRenderer, result)
-			return result, err
-		}
-		if t4res != nil {
-			result.DeletionsSkippedDueToMutation = t4res.FilesSkippedMutated
-		}
 	}
 
 	// 11. Resolve ExitStatus (when not already set by the gate-closed branch).
@@ -347,6 +357,7 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 		FilesFailed:                   result.FilesFailed,
 		BytesTotal:                    result.BytesTotal,
 		DeletionsSkippedDueToMutation: result.DeletionsSkippedDueToMutation,
+		SupportPaths:                  result.SupportPaths,
 		ManifestStore:                 ms,
 		EventStore:                    es,
 		RunLogStore:                   rls,

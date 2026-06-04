@@ -264,14 +264,16 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 
 	// Fault injection: PointT1PreRsync. Test-only hook for fault-injection
 	// e2e tests (Tasks 48-51b); no-op in release builds via the !faultinject
-	// stub. Wire phase string is "T1" to match --inject:phase=T1 specs.
-	// On non-nil return: treat as fatal phase error.
+	// stub. Wire phase string is "T1-pre" per the canonical Point table in
+	// the plan amendment (docs/planning/...:399); --inject:phase=T1-pre
+	// matches only this pre-rsync site, not the in-rsync progress or the
+	// post-rsync site. On non-nil return: treat as fatal phase error.
 	var bytesTotal int64
 	for _, c := range in.Candidates {
 		bytesTotal += c.Size
 	}
 	if hookErr := Hook(ctx, PointT1PreRsync, HookArgs{
-		Phase:      string(types.PhaseTransfer),
+		Phase:      string(PointT1PreRsync),
 		FilesTotal: len(in.Candidates),
 		BytesTotal: bytesTotal,
 		DestRoot:   in.DestRoot,
@@ -320,7 +322,7 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 				}
 				if hookFireErr == nil {
 					if hErr := Hook(rsyncCtx, PointT1Progress, HookArgs{
-						Phase:       string(types.PhaseTransfer),
+						Phase:       string(PointT1Progress),
 						CurrentFile: ev.Path,
 						FilesDone:   filesAttempted,
 						FilesTotal:  len(in.Candidates),
@@ -404,10 +406,11 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 	}
 
 	// Fault injection: PointT1Post. Fires AFTER rsync returns 0 so a fault
-	// can simulate a post-transfer disaster (e.g., a stale lock, a unmount
-	// race). On non-nil return: treat as fatal phase error.
+	// can simulate a post-transfer disaster (e.g., a stale lock, an unmount
+	// race). Wire phase string is "T1-post" per the canonical Point table
+	// (plan amendment). On non-nil return: treat as fatal phase error.
 	if hookErr := Hook(ctx, PointT1Post, HookArgs{
-		Phase:      string(types.PhaseTransfer),
+		Phase:      string(PointT1Post),
 		FilesDone:  filesAttempted,
 		FilesTotal: len(in.Candidates),
 		BytesDone:  bytesTransferred,

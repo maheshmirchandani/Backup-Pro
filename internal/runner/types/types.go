@@ -93,6 +93,11 @@ const (
 // RunResult is the runner's return value, populated incrementally across
 // phases and emitted as the final UIEvtSummary event. ExitStatus is one of
 // the five ExitStatus* constants declared above.
+//
+// SupportPaths is the runner-aggregated list of forensic file paths
+// (rsync.log from T1, deletion-log.ndjson from T3) gathered for the
+// support-bundle generator. Empty paths are excluded by the runner; the
+// slice can be nil for a copy-mode run that never produces a deletion log.
 type RunResult struct {
 	RunID                         string
 	StartedAt, FinishedAt         time.Time
@@ -101,6 +106,7 @@ type RunResult struct {
 	BytesTotal                    int64
 	DeletionsSkippedDueToMutation int
 	ExitStatus                    string
+	SupportPaths                  []string
 }
 
 // UIEventKind identifies the shape of a UIEvent. The wire strings are stable

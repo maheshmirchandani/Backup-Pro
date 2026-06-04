@@ -41,7 +41,8 @@ type FinishedRun struct {
 	FilesFailed                   int       `json:"files_failed"`
 	BytesTotal                    int64     `json:"bytes_total"`
 	DeletionsSkippedDueToMutation int       `json:"deletions_skipped_due_to_mutation"`
-	ExitStatus                    string    `json:"exit_status"` // ok | partial | copy_only_aborted_delete | crashed_resumed | preflight_failed
+	ExitStatus                    string    `json:"exit_status"`             // ok | partial | copy_only_aborted_delete | crashed_resumed | preflight_failed
+	SupportPaths                  []string  `json:"support_paths,omitempty"` // forensic file paths (rsync log, deletion log) for the support-bundle generator; omitted when empty
 }
 
 // RunLogStore handles the runs.ndjson append-only log.
