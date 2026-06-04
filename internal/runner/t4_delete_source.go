@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
@@ -548,12 +549,16 @@ func t4EmitPerFileAudit(ctx context.Context, es state.EventStore, phaseWire stri
 		})
 	default:
 		// failed_permission OR failed_immutable: both flow through
-		// delete_failed with the underlying error string in Details.
+		// delete_failed with errno + error in Details per the canonical
+		// Event Kinds table (plan line 367 requires both fields).
 		details := map[string]any{
 			"path": relPath,
 		}
 		if attemptErr != nil {
 			details["error"] = attemptErr.Error()
+			if errnoStr := errnoString(attemptErr); errnoStr != "" {
+				details["errno"] = errnoStr
+			}
 		}
 		return es.Append(ctx, state.Event{
 			V:         1,
@@ -564,6 +569,34 @@ func t4EmitPerFileAudit(ctx context.Context, es state.EventStore, phaseWire stri
 			Details:   details,
 		})
 	}
+}
+
+// errnoString extracts the POSIX errno name from a wrapped error, returning
+// the empty string when the chain does not carry a syscall.Errno. Maps to
+// the well-known macOS/Linux names ("EACCES", "EPERM", ...) for the
+// errno-table entries in spec section 6 (operator-facing error catalogue).
+func errnoString(err error) string {
+	var e syscall.Errno
+	if !errors.As(err, &e) {
+		return ""
+	}
+	switch e {
+	case syscall.EACCES:
+		return "EACCES"
+	case syscall.EPERM:
+		return "EPERM"
+	case syscall.ENOENT:
+		return "ENOENT"
+	case syscall.EBUSY:
+		return "EBUSY"
+	case syscall.EROFS:
+		return "EROFS"
+	case syscall.ENOTEMPTY:
+		return "ENOTEMPTY"
+	case syscall.EIO:
+		return "EIO"
+	}
+	return e.Error()
 }
 
 // openDeletionLog opens the deletion-log.ndjson for the run. Default
@@ -599,6 +632,7 @@ func writeDeletionLogLine(w deletionLogWriter, relPath string, status state.Dele
 	}
 	if attemptErr != nil {
 		line.Error = attemptErr.Error()
+		line.ErrnoString = errnoString(attemptErr)
 	}
 	encoded, err := json.Marshal(line)
 	if err != nil {

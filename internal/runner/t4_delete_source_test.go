@@ -194,7 +194,7 @@ func TestRunT4DeleteSource_CopyMode_DoesNotTouchExistingDeletionLog(t *testing.T
 	// Plant a pre-existing deletion-log with a known sentinel marker.
 	preDel := filepath.Join(runDir, "deletion-log.ndjson")
 	sentinel := []byte(`{"v":1,"path":"pre-existing","status":"deleted"}` + "\n")
-	if err := os.WriteFile(preDel, sentinel, 0o644); err != nil {
+	if err := os.WriteFile(preDel, sentinel, 0o600); err != nil {
 		t.Fatalf("write pre-existing deletion-log: %v", err)
 	}
 
@@ -605,13 +605,24 @@ func TestRunT4DeleteSource_PermissionDenied(t *testing.T) {
 	if _, ok := det["error"].(string); !ok {
 		t.Errorf("delete_failed.details.error missing or wrong type")
 	}
+	// Canonical Event Kinds table requires errno on delete_failed.Details.
+	// Locks the regression that the producer must populate this field
+	// (the deletionLogLine.ErrnoString field was declared but unused
+	// until the Task 26 review fix).
+	if errnoVal, ok := det["errno"].(string); !ok || errnoVal == "" {
+		t.Errorf("delete_failed.details.errno missing or empty; got %v", det["errno"])
+	}
 
-	// deletion-log includes the failed entry with status=failed_permission.
+	// deletion-log includes the failed entry with status=failed_permission
+	// AND a non-empty errno field (paired with the audit-event assertion above).
 	lines := readDeletionLog(t, filepath.Join(runDir, "deletion-log.ndjson"))
 	var found bool
 	for _, ln := range lines {
 		if ln["path"] == "lockeddir/denied.txt" && ln["status"] == string(state.DeletionFailedPermission) {
 			found = true
+			if errnoVal, ok := ln["errno"].(string); !ok || errnoVal == "" {
+				t.Errorf("deletion-log failed_permission entry missing errno; got %v", ln["errno"])
+			}
 		}
 	}
 	if !found {
@@ -1052,7 +1063,7 @@ func TestRunT4DeleteSource_DeletionLogSyncFailsMidLoop(t *testing.T) {
 	sentinel := errors.New("simulated sync fault")
 	t.Cleanup(restoreDeletionLogTestHook())
 	deletionLogTestHook = func(path string) (deletionLogWriter, error) {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, err
 		}
