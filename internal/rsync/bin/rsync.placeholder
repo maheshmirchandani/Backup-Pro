@@ -1,0 +1,7 @@
+#!/bin/sh
+# PLACEHOLDER: Task 12a's scripts/build-rsync.sh will replace this with a
+# real GNU rsync 3.4.1 universal2 binary. Until then, the embedded payload
+# is this shell script so the Go-side extraction, SHA256 verification,
+# chmod 0500, and chflags uchg logic are testable now.
+echo "PLACEHOLDER rsync; awaiting Task 12a build"
+exit 0
