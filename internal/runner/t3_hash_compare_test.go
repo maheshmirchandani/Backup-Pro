@@ -386,6 +386,14 @@ func TestRunT3HashCompare_SourceMutated(t *testing.T) {
 	if res.FilesSourceMutated != 1 {
 		t.Errorf("FilesSourceMutated = %d; want 1", res.FilesSourceMutated)
 	}
+	// stable.txt must still classify as verified despite the sibling mutation.
+	// Locks: source_mutated on one file does NOT poison the loop for others.
+	if res.PerFileStatus["stable.txt"] != state.StatusVerified {
+		t.Errorf("PerFileStatus[stable.txt] = %q; want verified", res.PerFileStatus["stable.txt"])
+	}
+	if res.FilesVerified != 1 {
+		t.Errorf("FilesVerified = %d; want 1", res.FilesVerified)
+	}
 
 	// Audit: source_mutated event with Details{path}.
 	events := readNDJSON(t, eventsPath)
@@ -636,11 +644,23 @@ func TestRunT3HashCompare_CancelledMidLoop(t *testing.T) {
 		t.Errorf("expected context.Canceled in chain; got %v", err)
 	}
 	// phase_completed must NOT be present; the phase did not complete.
+	// AND at least one per-file event must be present: cancellation lands
+	// AFTER cancelAfter=3 file_completed Appends succeeded, proving the
+	// loop made forward progress before the audit-store-driven abort fired
+	// (verifies the implementer's "partial files processed" claim).
 	events := readNDJSON(t, eventsPath)
+	perFileCount := 0
 	for _, ev := range events {
 		if ev["kind"] == "phase_completed" {
 			t.Error("phase_completed should be absent on mid-loop cancellation")
 		}
+		switch ev["kind"] {
+		case "file_completed", "hash_mismatch", "source_mutated":
+			perFileCount++
+		}
+	}
+	if perFileCount == 0 {
+		t.Error("expected at least one per-file event before cancellation; got zero (loop did not make progress)")
 	}
 }
 
@@ -889,6 +909,54 @@ func TestRunT3HashCompare_RendererErrorIsNonFatal(t *testing.T) {
 	}
 	if res.FilesVerified != 1 {
 		t.Errorf("FilesVerified = %d; want 1", res.FilesVerified)
+	}
+	// Renderer-broken case still emits all three UI events
+	// (PhaseStarted + FileCompleted + PhaseCompleted). Asserts the
+	// broken renderer was actually called for each one rather than
+	// silently bypassed on first error.
+	ui := rend.seen()
+	if len(ui) != 3 {
+		t.Errorf("renderer should be called 3 times despite errors; got %d (%+v)", len(ui), ui)
+	}
+}
+
+// TestRunT3HashCompare_EmptyCandidates locks the zero-file contract.
+// Spec section 3 row T2: classify per file; with no files there is
+// nothing to classify, but phase_started + phase_completed must still
+// land for the runs.ndjson chain to remain well-formed (invariant #10).
+func TestRunT3HashCompare_EmptyCandidates(t *testing.T) {
+	src, dest, _, _ := seedTransferred(t, []seedFile{
+		{rel: "ignored.txt", content: []byte("present-but-not-in-candidates")},
+	})
+	es, ms, eventsPath, _, _, _ := makeT3Stores(t)
+
+	res, err := RunT3HashCompare(context.Background(), T3Input{
+		SourceRoot:    src,
+		DestRoot:      dest,
+		Candidates:    nil,
+		Signatures:    map[string]types.Signature{},
+		Mode:          types.ModeCopy,
+		ManifestStore: ms,
+		EventStore:    es,
+	})
+	if err != nil {
+		t.Fatalf("empty Candidates should not error: %v", err)
+	}
+	if res == nil || res.FilesTotal != 0 {
+		t.Fatalf("FilesTotal = %d; want 0", res.FilesTotal)
+	}
+	if res.FilesVerified != 0 {
+		t.Errorf("FilesVerified = %d; want 0", res.FilesVerified)
+	}
+	events := readNDJSON(t, eventsPath)
+	kinds := []string{}
+	for _, ev := range events {
+		if k, ok := ev["kind"].(string); ok {
+			kinds = append(kinds, k)
+		}
+	}
+	if len(kinds) != 2 || kinds[0] != "phase_started" || kinds[1] != "phase_completed" {
+		t.Errorf("empty-Candidates events = %v; want [phase_started, phase_completed]", kinds)
 	}
 }
 
