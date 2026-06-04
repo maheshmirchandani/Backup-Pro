@@ -168,6 +168,13 @@ func RunT0Preflight(ctx context.Context, in T0Input) (*T0Result, error) {
 		// context.Background() here is deliberate; the alternative (skip
 		// the write on ctx.Err) loses forensic information. Bound any
 		// blocking by giving the background context a short timeout.
+		//
+		// Shared-budget note: the 5-second budget covers all three writes on
+		// the abort path (one EventStore.Append + EventStore.Checkpoint +
+		// RunLogStore.Checkpoint). On a wedged disk, expect at most partial
+		// audit data: the first write may exhaust the budget for the rest.
+		// This is by design; preserving partial forensic data beats hanging
+		// the runner indefinitely or losing all of it.
 		auditCtx := ctx
 		if ctx.Err() != nil {
 			var cancel context.CancelFunc

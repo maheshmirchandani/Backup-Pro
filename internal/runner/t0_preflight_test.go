@@ -234,8 +234,10 @@ func TestRunT0Preflight_HappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("event[1].details missing or wrong type: %v", events[1]["details"])
 	}
-	if _, ok := details["duration_ms"]; !ok {
-		t.Errorf("phase_completed.details missing duration_ms: %v", details)
+	if v, ok := details["duration_ms"].(float64); !ok {
+		t.Errorf("phase_completed.details missing or non-numeric duration_ms: %v", details)
+	} else if v < 0 {
+		t.Errorf("phase_completed.details duration_ms negative: %v", v)
 	}
 
 	// Run log: exactly one "started" line with the right fields.
@@ -319,7 +321,7 @@ func TestRunT0Preflight_RendererErrorIsNonFatal(t *testing.T) {
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
-	es, rls, _, runsPath := makeStores(t, dotDir, canonicalRunID)
+	es, rls, eventsPath, runsPath := makeStores(t, dotDir, canonicalRunID)
 
 	rend := &captureRenderer{err: errors.New("renderer is broken")}
 	res, err := RunT0Preflight(context.Background(), T0Input{
@@ -346,6 +348,19 @@ func TestRunT0Preflight_RendererErrorIsNonFatal(t *testing.T) {
 	runs := readNDJSON(t, runsPath)
 	if len(runs) != 1 || runs[0]["event"] != "started" {
 		t.Errorf("expected one started line on disk, got %v", runs)
+	}
+
+	// And events.ndjson got both phase_started and phase_completed: the
+	// renderer error didn't poison the audit path.
+	events := readNDJSON(t, eventsPath)
+	kinds := []string{}
+	for _, ev := range events {
+		if k, ok := ev["kind"].(string); ok {
+			kinds = append(kinds, k)
+		}
+	}
+	if len(kinds) != 2 || kinds[0] != "phase_started" || kinds[1] != "phase_completed" {
+		t.Errorf("expected [phase_started, phase_completed] in events.ndjson; got %v", kinds)
 	}
 }
 
@@ -392,8 +407,10 @@ func TestRunT0Preflight_EmptyDestRoot_AbortsBeforeStarted(t *testing.T) {
 	if !ok {
 		t.Fatalf("phase_aborted.details missing: %v", events[1])
 	}
-	if _, ok := details["duration_ms"]; !ok {
-		t.Errorf("phase_aborted.details missing duration_ms: %v", details)
+	if v, ok := details["duration_ms"].(float64); !ok {
+		t.Errorf("phase_aborted.details missing or non-numeric duration_ms: %v", details)
+	} else if v < 0 {
+		t.Errorf("phase_aborted.details duration_ms negative: %v", v)
 	}
 	if _, ok := details["error"]; !ok {
 		t.Errorf("phase_aborted.details missing error: %v", details)
@@ -645,7 +662,7 @@ func TestRunT0Preflight_AppendPhaseCompletedFails(t *testing.T) {
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
-	innerES, innerRLS, _, _ := makeStores(t, dotDir, canonicalRunID)
+	innerES, innerRLS, _, runsPath := makeStores(t, dotDir, canonicalRunID)
 	sentinel := errors.New("simulated events fault")
 	es := &faultingEventStore{inner: innerES, failAppendKind: "phase_completed", err: sentinel}
 
@@ -663,6 +680,16 @@ func TestRunT0Preflight_AppendPhaseCompletedFails(t *testing.T) {
 	}
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel; got %v", err)
+	}
+
+	// The "started" line WAS written before phase_completed failed; the run
+	// is now orphan-finalizable (invariant #10 two-line model: missing
+	// "finished" line marks this as crashed_resumed on next preflight).
+	// Asserting this here catches a future refactor that accidentally
+	// shifts AppendStarted to AFTER phase_completed Append.
+	runs := readNDJSON(t, runsPath)
+	if len(runs) != 1 || runs[0]["event"] != "started" {
+		t.Errorf("expected orphaned started line after phase_completed failure; got %v", runs)
 	}
 
 	// Lock must have been released (forward-progress did not happen).
