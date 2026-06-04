@@ -216,8 +216,8 @@ PREFLIGHT (T0) → ENUMERATE (T0+) → TRANSFER (T1) → HASH + COMPARE (T2) →
 
 | Phase | Operations | On crash |
 |---|---|---|
-| T0 | Lock; filesystem check; symlink check; version check; rsync verify; namespace compute; profile load. | No state changes. |
-| T0+ | Walk source; apply filters; capture (size, mtime_ns) signatures; disk-space precheck; optional dry-run preview; write "started" line to runs.ndjson. | "started" line in runs.ndjson; no dest writes. |
+| T0 | Codesign self-verify (invariant #29); filesystem check; symlink baseline (invariant #17); VolumeUUID capture (invariant #30); lock acquisition; version.json read (FAIL-CLOSED per invariant #11); rsync extraction; namespace compute. **Write "started" line to runs.ndjson at end of T0 success path** (commits the run to history once the lock is held). | "started" line absent if preflight aborted before lock acquisition; if acquired then aborted, abort-path Checkpoint of events.ndjson captures the failure but no started line is written. |
+| T0+ | Walk source; apply filters; capture (size, mtime_ns) signatures; disk-space precheck; optional dry-run preview; profile load. | "started" line already present; T0+ failure leaves an orphan-finalizable run (will be finalized as `crashed_resumed` on next preflight). |
 | T1 | Single rsync invocation over full file list with `--archive --partial --xattrs --progress`. Parse progress events; capture rsync output to rsync.log. | Partial dest tree; rsync `--partial` resumes on re-run. |
 | T2 | For each file: hash source again, hash dest, re-stat source against T0 signature. Classify status: verified / hash_mismatch / source_mutated / not_transferred. Append manifest line per file. | Partial manifest; un-hashed files are not_transferred on next inspection. |
 | T3 | (Move mode only.) If any T2 status is not `verified` → skip phase entirely (atomic gate). Otherwise per-file: re-stat source; if signature unchanged unlink; if changed record deletion_skipped_mutated. Append deletion-log.ndjson per unlink with fsync. | deletion-log captures progress; TUI surfaces "previous run did not complete; inspect / resume?" |
