@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night, end of session after Tasks 22 + 23 + cleanup)
+## Project status (2026-06-04 night, after Tasks 22, 23, 24 + cleanup)
 
-**Phase:** Plan 1 execution. Tasks 1-23 complete + reviewed + applied. Task 22a queued. Both deferred follow-ups closed (spec invariant #11; lock subpackage coverage). CI green. Latest commit: `af39928 docs(spec+plan): clarify audit-store-mid-phase-failure terminal state`.
+**Phase:** Plan 1 execution. Tasks 1-24 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `b7026eb fix(runner+rsync): Task 24 review fixes; export BuildArgs`.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -85,7 +85,22 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 ## History (newest first)
 
-### 2026-06-04 (latest): Task 23 + spec/plan amendments
+### 2026-06-04 (latest): Task 24 + Task 24 review fixes
+
+Task 24 (`internal/runner/t2_transfer.go`, phase T1) dispatched per the revised protocol. Implementer commit `7dcce88` shipped but CI failed at the `Lint` step on `gofmt -s` drift. The bare `gofmt -l` check the implementer ran did not catch doc-comment list-indent shapes that `gofmt -s` (the simplifier; what golangci-lint enforces) rewrites. Caught and fixed in `b7026eb`. Lesson added to memory: local pre-commit must run `gofmt -s -l`.
+
+Combined review (`b7026eb` for fixes):
+- gofmt -s drift on both files (the CI blocker).
+- UI stranded on `transfer_started.Append` failure: the audit-fail path returned without emitting `UIEvtPhaseCompleted(aborted)`, leaving a TUI renderer stuck on the "T1 started" frame. Now emits the abort UIEvent before returning, matching the t1_enumerate.go mid-stream pattern. Memory updated with the principle.
+- `command_line` drift trap: `rsyncCommandLine` duplicated the argv-construction logic from internal/rsync's unexported `buildArgs`. Fixed by exporting `rsync.BuildArgs` (renamed from `buildArgs`) and rewriting `rsyncCommandLine` to call it. Single source of truth. Plus a lockstep test in `TestRunT2Transfer_HappyPath` asserting the audit's command_line is byte-equal to a fresh `rsyncCommandLine(expectedOpts)`.
+
+Two minor follow-ups from the review queued as latent (not blocking):
+- Empty-Candidates audit semantics: code currently emits `transfer_started`/`transfer_completed` even when rsync is not invoked. Either tighten the canonical Event Kinds table to allow this OR change the code to skip the transfer_* pair. Pick one in a future amendment.
+- UIEvtProgress throttling: `internal/runner/types/types.go` doc-comment promises "one progress tick per 200ms" but the current T1 emits one per ProgressTransferring event. Add a throttle for v0.2; not blocking v0.1.
+
+Task 24 commits: `7dcce88` (impl), `b7026eb` (review fixes + gofmt rescue + BuildArgs export).
+
+### 2026-06-04 (later): Task 23 + spec/plan amendments
 
 Task 23 (`internal/runner/t1_enumerate.go`, phase T0+) dispatched per the revised protocol. Implementer reported runner package coverage at 92.9% with 13 tests. Commit `de5435b`.
 
