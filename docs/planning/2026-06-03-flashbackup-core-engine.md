@@ -249,7 +249,7 @@ type RunOptions struct {
     Mode        Mode
     DryRun      bool
     Delete      bool  // mirror mode: remove FB-written paths absent from source
-    UIRenderer  plain.Renderer  // PS3: event bus interface; can be nil (no UI events emitted)
+    UIRenderer  Renderer  // PS3: event bus interface lives in runner/types (see below) to avoid an import cycle with internal/plain; nil means no UI events emitted
 }
 
 type RunResult struct {
@@ -259,7 +259,17 @@ type RunResult struct {
     FilesFailed                   int
     BytesTotal                    int64
     DeletionsSkippedDueToMutation int
-    ExitStatus                    string  // "ok" | "partial" | "copy_only_aborted_delete" | "preflight_failed"
+    ExitStatus                    string  // "ok" | "partial" | "copy_only_aborted_delete" | "crashed_resumed" | "preflight_failed"
+}
+
+// Renderer is the UIEvent sink, owned by the runner package (the consumer
+// of the interface). internal/plain (Task 33) provides the terminal
+// implementation; a future internal/tui (Plan 2) provides the Bubble Tea
+// one. Both packages import runner/types; the runner does NOT import them.
+// This placement avoids an import cycle and follows the Go idiom that
+// interfaces live with their consumers.
+type Renderer interface {
+    OnEvent(ctx context.Context, ev UIEvent) error
 }
 
 func Run(ctx context.Context, opts RunOptions) (*RunResult, error)
@@ -295,13 +305,11 @@ type ProgressInfo struct {
     ETASeconds            int
 }
 
-// internal/plain (Task 33)
+// internal/plain (Task 33): implements runner.Renderer; the interface itself
+// lives in runner/types above. NewPlainRenderer returns a value satisfying
+// runner.Renderer for terminal output.
 
-type Renderer interface {
-    OnEvent(ctx context.Context, ev runner.UIEvent) error
-}
-
-func NewPlainRenderer(out io.Writer, isTTY bool) Renderer
+func NewPlainRenderer(out io.Writer, isTTY bool) runner.Renderer
 
 // internal/verify (Tasks 30-32)
 
@@ -309,7 +317,7 @@ type VerifyOptions struct {
     RunID         string  // "" means latest
     All           bool
     CheckExtras   bool
-    UIRenderer    plain.Renderer  // can be nil
+    UIRenderer    runner.Renderer  // can be nil; same interface as RunOptions.UIRenderer
 }
 
 type VerifyResult struct {
