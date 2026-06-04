@@ -2,13 +2,11 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night, after Tasks 22-27 + cleanup; PAUSE for next session)
+## Project status (2026-06-04 night session, after Task 28)
 
-**Phase:** Plan 1 execution. Tasks 1-27 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `2f35c7b fix(runner): Task 27 review fixes (minor style)`.
+**Phase:** Plan 1 execution. Tasks 1-28 complete. CI green at `6e958fe`. Task 28 review + Task 29 implementer dispatching now in overlap-CI pattern.
 
-**Runner state machine COMPLETE for all six phases: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) + T3 (Task 26) + T4 (Task 27). The per-phase functions all exist as siblings in `internal/runner/`. Remaining runner work: Task 28 (faultinject build-tagged DSL + symbol scan) and Task 29 (top-level `runner.Run` state machine that stitches the six phases together).**
-
-**Next session resume protocol:** Start with Task 28 (`internal/runner/faultinject.go` + `internal/runner/faultinject_release.go`). Build tag `faultinject`. Implements the DSL grammar from API Contracts (`corrupt|kill|mutate-source|unmount|disk-full|permission-denied` × `phase|file|after_pct|after_count`). Provides CI release gate: `make verify-release` runs `nm | grep faultinject` (already added to Task 2 Makefile). Release stub file at `faultinject_release.go` must say "DO NOT DELETE: release binary won't link without this".
+**Runner state machine COMPLETE (Task 22-27) + fault-injection DSL + release stub COMPLETE (Task 28). Remaining runner work: Task 29 (top-level `runner.Run` state machine that stitches the six phase functions together via signal handler, RunID generation, store opening, atomic gate decision, ExitStatus resolution, faultinject.Hook insertions at instrumented call sites).**
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -32,7 +30,7 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 **Latest CI green:** confirmed after fix for gosec G306 (commit `f0cf05c`). Per-package coverage real: hash 84.6%, state 83.0%, profiles 81.9%, drives 85.3% (all above 80% gate).
 
-**Tasks complete (10/58):**
+**Tasks complete (28/58):**
 1. Bootstrap (manual): git init, GPLv3, conventions, GitHub Releases-ready
 2. Makefile + golangci-lint + CI workflow (+ 4 code-review fixes + 4 Makefile-guard fixes + coverage-gate correctness fix + gosec G306 test-fixture fix)
 3. `internal/paths` namespace prefix (3 tests)
@@ -88,6 +86,26 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (later night): Task 28 (faultinject DSL + release stub)
+
+Task 28 (`internal/runner/faultinject.go` build tag `faultinject` + `internal/runner/faultinject_release.go` build tag `!faultinject`) dispatched per the established protocol. **First task to need a release-vs-faultinject build-tag pair**: same public API in both files so the runner phase code at instrumented sites compiles under either tag; the faultinject build executes the DSL grammar, the release stub returns `ErrFaultinjectStripped` on any non-empty Parse and no-ops Hook.
+
+Implementer commit `6e958fe`; 30 new tests (24 faultinject + 6 release-stub); runner package coverage holds at 90.0%. CI green first try across all four jobs (test, bench, e2e-fast, e2e-safety). All pre-commit gates passed (vet, gofmt -s -l, race, coverage, both build-tag compilations).
+
+Design decisions worth recording (subject to reviewer scrutiny):
+- **Path discovery**: HookArgs carries `DestRoot` + `SourceRoot`; action helpers build absolute paths via `filepath.Join(<root>, CurrentFile)`. Keeps `Fault` parse-time pure; runner threads roots through per-phase.
+- **Kill semantics**: returns sentinel `ErrFaultKill` instead of `os.Exit` so tests can assert the would-have-killed path without crashing the test process. `SetKillActionForTest(fn)` lets tests swap the helper.
+- **One-shot triggers**: package-private `armedFault` wrapping each active `Fault` with an `armed bool`; first match flips the bit and stops further firings (locks the "after_pct/after_count fire once per fault" contract).
+- **Release-gate sentinel**: package var `faultinjectBuildTagPresent` deliberately includes lowercase "faultinject" substring as the `nm | grep` target. Reassigned in `init()` to defeat dead-code elimination.
+- **Release stub import surface**: only `context` and `errors` to prevent the release binary from dragging code containing the substring "faultinject" through indirect references.
+
+Follow-ups surfaced for downstream consideration (not blocking Task 29):
+- `make verify-release` gate is structurally limited against `-s -w` stripped binaries (no symbol table). Could swap to a DWARF-string scan or `strings | grep ErrFaultinjectStripped` for Phase 0 dogfood. Logged for post-Task-34 review.
+- `Point` constants exist for documentation but Hook matching is `args.Phase`-string-only; extend `hookMatches` to consider Point if a future fault needs callsite-specific gating (e.g., distinguish T1-pre from T1-post within a single phase). Today's grammar doesn't expose Point to the DSL.
+- `make verify-release` cannot fully run until `cmd/flashbackup/` lands (Task 34); Makefile guards skip cleanly today. The implementer demonstrated the gate works by building a temp `cmd/_fbverifytest` stub: unstripped release binary `nm` returns no faultinject hits; unstripped faultinject binary returns `faultinjectBuildTagPresent` hit (gate would fail the release).
+
+Task 28 commit: `6e958fe` (implementer; combined review dispatching with Task 29 implementer).
 
 ### 2026-06-04 (latest): Task 27 (T4 finalize) - runner state machine COMPLETE
 
