@@ -2,9 +2,20 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04)
+## Project status (2026-06-04, end of session at 91% context)
 
-**Phase:** Plan 1 execution in progress via subagent-driven development. Foundation packages (Tasks 1-9) complete + Task 10 (drives) complete. Integration phase (Tasks 11-20) in progress.
+**Phase:** Plan 1 execution. Tasks 1-20 (integration phase complete) pushed to main. Tasks 19-20 implementer-only (review skipped for context budget); MUST be reviewed on session resume before Task 21 dispatches.
+
+**Repo:** `https://github.com/maheshmirchandani/Backup-Pro`. Latest commit: `e88b29c feat(preflight): integrate all gates into PreflightContext (Task 20)`.
+
+**Next session resume protocol:**
+
+1. Run combined spec + quality review subagent on Task 19 (commit `a2c159d`): verify `drives.Query` promotion is sound + `volume_uuid` package correct.
+2. Run combined spec + quality review on Task 20 (commit `e88b29c`): verify the 9-gate composition + rollback + Release idempotency.
+3. Reconcile `PreflightContext` shape: code has richer fields (`SymlinkBaseline`, `Filesystem`, `DotDir`, `RsyncPath`) than the plan's API Contracts (~line 194). Update the plan to match the code (the richer shape is what Task 22 needs).
+4. Then begin Task 21 (`internal/runner/types`) with the runner state machine.
+
+**Coverage at session end:** drives 85%+, hash 84.6%, paths covered, profiles 81.9%, rsync 90%+, selection 84.6%, state 83%, codesign 92%, filesystem near-full, lock 75%, preflight (top-level integration) measured via 8 tests.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro` (private, GPLv3). Local: `/Users/maheshm/Documents/1-AI-Projects/Utilities/Backup-Mac/`.
 
@@ -66,6 +77,20 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04: Tasks 11-20 executed (integration phase complete)
+- Switched from sequential to overlap-CI mode mid-session: dispatch task N+1 implementer in parallel with task N review subagent. CI runs in background. Saved 1-2 min per task.
+- Task 11 (selection): NFC canonicalization + symlink-not-followed + duplicate-NFC rejection. 84.6% coverage. One em-dash review fix.
+- Task 12 (rsync embed): placeholder shell script + SHA256-keyed extract path + chflags uchg. Task 12a (build-rsync.sh real implementation) still stubbed.
+- Task 13 (rsync wrapper): --from0 --files-from=- stdin pipe; review caught missing spec-mandated --prefix filename test (now added in TestFileListBytes_DoubleDashPrefixSurvives).
+- Task 14 (rsync progress parser): hand-authored golden file at `testdata/rsync-3.4.1-progress.golden`; contract test pins event counts per invariant #43. Will need regen once Task 12a embeds real rsync.
+- Task 15 (preflight/lock): strong stale detection. Review caught 4 issues: missing age in HeldLockError, LC_ALL=C on ps invocation, missing recycled-PID test, doc.go call-order. All applied. Plan API Contracts updated: `Acquire(ctx, path, volumeUUID)` instead of `AcquireLock(ctx, path)`.
+- Task 16 (preflight/filesystem): syscall.Statfs + exFAT/msdos/unknown rejection + noexec rejection + reformat recipe. MNT_* constants inlined (4 values, BSD ABI stable).
+- Task 17 (preflight/symlink): (dev,ino) baseline per path component + Verify for phase-boundary cross-checks. Caught my prompt bug (`%w` in `fmt.Sprintf` is invalid). `realTempDir` helper resolves macOS /var symlink.
+- Task 18 (preflight/codesign): `codesign --verify --strict` self-check; ldflags `IsReleaseBuild=true` for release switch. Makefile updated with LDFLAGS_RELEASE / LDFLAGS_FAULTINJECT.
+- Task 19 (preflight/volume_uuid): promoted `drives.queryVolume` to public `drives.Query`. Capture + Verify on VolumeUUID, complementary to symlink's dev/ino check.
+- Task 20 (preflight integrate): 9-gate composition with rollback on partial failure. PreflightContext stored by runner. Tests use hdiutil-mounted APFS DMG since `t.TempDir()` under /var/folders can't return a VolumeUUID via diskutil.
+- CI fixes during phase: Makefile guards for not-yet-existing dirs (cmd/, test/e2e/), coverage gate switched to real per-package `go test -cover` (was buggy per-function average), gosec G306 on test fixtures dropped to 0600, errcheck on defer chains migrated to t.Cleanup.
 
 ### 2026-06-04: Tasks 1-10 executed via subagent-driven development
 - Mode A locked (rigorous: implementer + spec review + code quality review per task). MM preference saved to memory `feedback_quality_over_speed.md`.
