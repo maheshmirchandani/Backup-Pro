@@ -125,6 +125,10 @@ func EnumerateVolumes(ctx context.Context, includeRoot bool) ([]Volume, error) {
 // error, or ctx error from CommandContext).
 func Query(ctx context.Context, mountpoint string) (*Volume, error) {
 	cmd := exec.CommandContext(ctx, diskutilPath, "info", "-plist", mountpoint)
+	// Force LC_ALL=C for locale-independent diskutil output. The XML plist
+	// uses ASCII keys today, but error strings on non-English locales differ
+	// and could confuse future parsers; mirror the lock package precedent.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("diskutil info %q: %w", mountpoint, err)

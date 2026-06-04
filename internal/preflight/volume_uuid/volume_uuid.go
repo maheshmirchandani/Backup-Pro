@@ -22,8 +22,8 @@ type Captured struct {
 
 // VolumeUUIDChangedError wraps ErrVolumeUUIDChanged with diagnostics.
 // Use errors.Is(err, ErrVolumeUUIDChanged) for sentinel checks and
-// errors.As(err, &*VolumeUUIDChangedError) to extract Mountpoint/Expected/Got
-// for surfacing in runner-level event logs.
+// errors.As(err, &v) where v is *VolumeUUIDChangedError to extract
+// Mountpoint/Expected/Got for surfacing in runner-level event logs.
 type VolumeUUIDChangedError struct {
 	Mountpoint string
 	Expected   string
