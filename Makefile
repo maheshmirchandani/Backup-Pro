@@ -75,22 +75,24 @@ bench-baseline:
 		echo "skip: no bench dirs exist yet"; \
 	fi
 
-# Per-package coverage gates: runner/state/hash/preflight >=80% line per invariant #42
-# Use trailing slash anchor to avoid substring matches (e.g., internal/state vs internal/statemachine).
-# Each safety-critical package is independently gated. Packages that don't exist yet
-# are skipped (the gate kicks in once the package lands).
+# Per-package coverage gates: runner/state/hash/preflight >=80% statement-line per invariant #42.
+# Runs `go test -cover` per package and parses the "coverage: X% of statements" line — this is the
+# real statement-weighted coverage Go reports (not a per-function average, which would inflate the
+# number on small util functions). Each safety-critical package is independently gated; packages
+# that don't exist yet are skipped (the gate kicks in per package as it lands).
 coverage:
-	@dirs=""; for pkg in runner hash state preflight; do \
-		[ -d ./internal/$$pkg ] && dirs="$$dirs ./internal/$$pkg/..."; \
-	done; \
-	if [ -z "$$dirs" ]; then echo "skip: no safety-critical packages exist yet"; exit 0; fi; \
-	go test -coverprofile=coverage.out -covermode=atomic $$dirs
-	@for pkg in runner hash state preflight; do \
+	@failed=""; ran=""; \
+	for pkg in runner hash state preflight; do \
 		[ -d ./internal/$$pkg ] || continue; \
-		pct=$$(go tool cover -func=coverage.out | grep -E "internal/$$pkg(/|\.go:)" | awk '{sum+=$$3+0;n+=1} END {if(n>0)printf "%.1f",sum/n;else print "0"}'); \
-		echo "$$pkg coverage: $$pct%"; \
-		awk -v p=$$pct 'BEGIN{if(p+0 < 80){exit 1}}' || { echo "FAIL: $$pkg below 80%"; exit 1; }; \
-	done
+		ran="$$ran $$pkg"; \
+		pct=$$(go test -cover -timeout=2m ./internal/$$pkg/... 2>&1 | grep -oE 'coverage: [0-9.]+%' | grep -oE '[0-9.]+' | head -1); \
+		if [ -z "$$pct" ]; then pct=0; fi; \
+		printf "%-12s %s%%\n" "$$pkg" "$$pct"; \
+		awk -v p=$$pct 'BEGIN{if(p+0 < 80){exit 1}}' || failed="$$failed $$pkg"; \
+	done; \
+	if [ -z "$$ran" ]; then echo "skip: no safety-critical packages exist yet"; exit 0; fi; \
+	if [ -n "$$failed" ]; then echo "FAIL: below 80%:$$failed"; exit 1; fi; \
+	echo "OK: all safety-critical packages >= 80%"
 
 # Release-gate symbol-scan per invariant #35: assert no faultinject hooks leak into release build
 # Anchor regex to avoid false positives on legitimate symbols containing "Inject".
