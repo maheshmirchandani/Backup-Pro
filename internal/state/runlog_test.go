@@ -31,7 +31,7 @@ func newRunLogStore(t *testing.T) (RunLogStore, string) {
 func writeRunLogFixture(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runs.ndjson")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 	return path

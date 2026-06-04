@@ -203,7 +203,7 @@ func TestStore_LoadRespects1MBCap(t *testing.T) {
 	// with a "junk" string > 1 MB.
 	bigField := strings.Repeat("x", 2*1024*1024) // 2 MB
 	raw := []byte(`{"v":1,"junk":"` + bigField + `","profiles":[]}`)
-	if err := os.WriteFile(path, raw, 0644); err != nil {
+	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
