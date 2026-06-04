@@ -76,16 +76,23 @@ type RunOptions struct {
 	UIRenderer Renderer
 }
 
+// ExitStatus constants are the canonical wire strings persisted to the
+// runs.ndjson "finished" line per spec section 5. The field on RunResult is
+// typed string (not ExitStatus) to keep forward-compat with future spec
+// additions, but call sites should compare against these constants rather
+// than inlining quoted literals; a typo here is a manifest-schema regression
+// per invariant #13.
+const (
+	ExitStatusOK                    = "ok"                       // all files verified, all deletions completed
+	ExitStatusPartial               = "partial"                  // one or more files failed validation or copy
+	ExitStatusCopyOnlyAbortedDelete = "copy_only_aborted_delete" // T1+T2 ok but the move-mode atomic gate fired
+	ExitStatusCrashedResumed        = "crashed_resumed"          // run finalized by orphan-recovery on a later launch
+	ExitStatusPreflightFailed       = "preflight_failed"         // T0 returned an error; no files were touched
+)
+
 // RunResult is the runner's return value, populated incrementally across
-// phases and emitted as the final UIEvtSummary event. ExitStatus is one of:
-//
-//	"ok"                        all files verified, all deletions completed
-//	"partial"                   one or more files failed validation or copy
-//	"copy_only_aborted_delete"  T1+T2 ok but the move-mode atomic gate fired
-//	"preflight_failed"          T0 returned an error; no files were touched
-//
-// The string is also written to runs.ndjson "finished" line per spec section
-// 5, which is why it is a string (forward-compat) rather than an enum.
+// phases and emitted as the final UIEvtSummary event. ExitStatus is one of
+// the five ExitStatus* constants declared above.
 type RunResult struct {
 	RunID                         string
 	StartedAt, FinishedAt         time.Time

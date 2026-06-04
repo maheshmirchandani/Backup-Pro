@@ -122,6 +122,46 @@ func TestRunOptions_ZeroValue(t *testing.T) {
 	_ = o.Profile
 }
 
+// TestRunOptions_NilRendererValid locks the spec contract that a nil
+// UIRenderer is legal (means "no UI events emitted"; events still persist
+// to events.ndjson via state.EventStore). If a future refactor adds a
+// non-nil precondition to runner.Run, this test still passes because the
+// type-system check is the only thing the field guarantees here; the
+// runtime check lives in the runner package. The test exists to surface
+// the field-can-be-nil contract at the type-package boundary.
+func TestRunOptions_NilRendererValid(t *testing.T) {
+	opts := RunOptions{UIRenderer: nil}
+	if opts.UIRenderer != nil {
+		t.Error("nil UIRenderer should remain nil")
+	}
+}
+
+// TestExitStatus_KnownValues pins the five canonical wire strings. A typo
+// in any of these constants is a manifest-schema regression (invariant
+// #13) because the strings flow to runs.ndjson "finished" lines and to
+// any external tooling that grep-classifies historical runs.
+func TestExitStatus_KnownValues(t *testing.T) {
+	cases := map[string]string{
+		"ok":                       ExitStatusOK,
+		"partial":                  ExitStatusPartial,
+		"copy_only_aborted_delete": ExitStatusCopyOnlyAbortedDelete,
+		"crashed_resumed":          ExitStatusCrashedResumed,
+		"preflight_failed":         ExitStatusPreflightFailed,
+	}
+	for want, got := range cases {
+		if got != want {
+			t.Errorf("ExitStatus constant for %q = %q; want %q", want, got, want)
+		}
+	}
+	seen := map[string]bool{}
+	for _, v := range cases {
+		if seen[v] {
+			t.Errorf("duplicate ExitStatus wire string: %q", v)
+		}
+		seen[v] = true
+	}
+}
+
 // TestRunResult_ZeroValue mirrors the RunOptions zero-value test. RunResult
 // is the orchestrator return type; the runner builds it up across phases
 // from a zero base, so the type system must accept that pattern.

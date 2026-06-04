@@ -27,7 +27,11 @@
 //	T4  finalize     gzip the manifest, append the runs.ndjson "finished"
 //	                 line, release the lock, emit UIEvtSummary
 //
-// ASCII state diagram:
+// ASCII state diagram. The hard-fail arrow on T1 represents an rsync
+// invocation that exited before producing any per-file output (e.g.,
+// embedded-binary extraction failed, immediate I/O error). Per-file failures
+// inside a running rsync are NOT a T1 hard-fail; they flow through T2 where
+// each file is classified.
 //
 //	[T0 preflight]
 //	     |  ok
@@ -35,11 +39,13 @@
 //	[T0+ enumerate]
 //	     |  ok
 //	     v
-//	[T1 transfer]  ---fail--->  [T4 finalize as partial]
-//	     |  ok
+//	[T1 transfer]  ---hard-fail--->  [T4 finalize as partial]
+//	     |  ok (or partial; T2 will classify)
 //	     v
-//	[T2 hash+compare]
-//	     |  copy mode  ------>  [T4 finalize]
+//	[T2 hash+compare]  -----------> classify each file as verified /
+//	     |                          hash_mismatch / source_mutated /
+//	     |                          not_transferred / *_unreadable
+//	     |  copy mode  ----------->  [T4 finalize]
 //	     |  move mode
 //	     v
 //	[T3 delete (atomic gate)]
@@ -65,7 +71,8 @@
 //	          crash mid-T4 leaves a recoverable state (manifest written
 //	          before runs.ndjson finished line).
 //
-// A second signal during graceful shutdown forces immediate exit. The
+// A second signal of the same type within 5 seconds of the first forces
+// immediate exit, bypassing the graceful flush above (spec section 6). The
 // runner package owns this state machine; types.go just declares the
 // constants and the data the renderer sees.
 package types
