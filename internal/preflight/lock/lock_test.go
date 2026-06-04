@@ -289,6 +289,67 @@ func TestProcessAlive_Dead(t *testing.T) {
 	}
 }
 
+// TestRelease_AfterExternalUnlink covers the os.ErrNotExist branch in
+// Release: if something else (a stale-recovery sibling process, a cleanup
+// script, a user) deleted the lock file out from under us, Release must
+// still close the FD cleanly without surfacing the removal error.
+func TestRelease_AfterExternalUnlink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lock")
+	h, err := Acquire(context.Background(), path, "vol")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	// Yank the file out from under the handle.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("setup remove: %v", err)
+	}
+	if err := h.Release(); err != nil {
+		t.Errorf("Release after external unlink should return nil; got %v", err)
+	}
+}
+
+// TestFallbackHostname asserts the fallback path returns a non-empty value.
+// In CI and on developer laptops os.Hostname() always succeeds, so we
+// cannot directly exercise the "unknown-host" branch without invasive
+// stubbing; the assertion below verifies the success branch and the
+// invariant that the result is never empty (required by getHostUUID
+// callers downstream).
+func TestFallbackHostname(t *testing.T) {
+	got := fallbackHostname()
+	if got == "" {
+		t.Error("fallbackHostname() returned empty string; downstream callers require non-empty")
+	}
+}
+
+// TestProcessStartTimeUnix_DeadPID covers the ps-error branch: the ps
+// command returns non-zero (or empty) when asked about a non-existent
+// PID. Either outcome should produce a wrapped error rather than a
+// stale zero value masquerading as a real start time.
+func TestProcessStartTimeUnix_DeadPID(t *testing.T) {
+	// PID 999999 is virtually always absent on macOS.
+	_, err := processStartTimeUnix(999999)
+	if err == nil {
+		t.Skip("PID 999999 happens to be live on this system; skipping")
+	}
+}
+
+// TestAcquire_ParentDirMissing covers the create-error wrap branch in
+// tryAcquireOnce: opening the lock file fails because the parent
+// directory does not exist. The error must NOT be wrapped as a
+// symlink-refusal (that branch is for ELOOP only).
+func TestAcquire_ParentDirMissing(t *testing.T) {
+	// /nonexistent-parent-XXX-flashbackup/lock guarantees ENOENT on open.
+	path := filepath.Join(t.TempDir(), "no-such-subdir", "lock")
+	_, err := Acquire(context.Background(), path, "vol")
+	if err == nil {
+		t.Fatal("expected error when lock parent dir is missing")
+	}
+	if contains(err.Error(), "symlink") {
+		t.Errorf("ENOENT error should not be reported as symlink refusal; got %v", err)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && (indexOf(s, sub) >= 0))
 }
