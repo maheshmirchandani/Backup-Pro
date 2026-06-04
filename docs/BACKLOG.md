@@ -2,20 +2,27 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04, end of session at 91% context)
+## Project status (2026-06-04, end of resume session)
 
-**Phase:** Plan 1 execution. Tasks 1-20 (integration phase complete) pushed to main. Tasks 19-20 implementer-only (review skipped for context budget); MUST be reviewed on session resume before Task 21 dispatches.
+**Phase:** Plan 1 execution. Tasks 1-21 complete + reviewed + applied. CI green. Latest commit: `b17dc22 fix(coverage): tree-weighted gate; handle no-statement packages`.
 
-**Repo:** `https://github.com/maheshmirchandani/Backup-Pro`. Latest commit: `e88b29c feat(preflight): integrate all gates into PreflightContext (Task 20)`.
+**Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
-**Next session resume protocol:**
+**Next session begin protocol:**
 
-1. Run combined spec + quality review subagent on Task 19 (commit `a2c159d`): verify `drives.Query` promotion is sound + `volume_uuid` package correct.
-2. Run combined spec + quality review on Task 20 (commit `e88b29c`): verify the 9-gate composition + rollback + Release idempotency.
-3. Reconcile `PreflightContext` shape: code has richer fields (`SymlinkBaseline`, `Filesystem`, `DotDir`, `RsyncPath`) than the plan's API Contracts (~line 194). Update the plan to match the code (the richer shape is what Task 22 needs).
-4. Then begin Task 21 (`internal/runner/types`) with the runner state machine.
+1. Pull latest; confirm CI green via `gh run list --limit 1`.
+2. **Begin Task 22** (`internal/runner/t0_preflight.go`): preflight orchestration, emit `state.Event{Kind:"phase_started",Phase:"T0"}` via `EventStore.Append`, "started" line via `RunLogStore.AppendStarted`, `Checkpoint()` at phase end. Per the plan API Contracts (now reconciled with Task 20's actual `PreflightContext` shape) and Task 21's runner types.
+3. Continue overlap-CI cycle: Task N+1 implementer dispatched in parallel with Task N review subagent.
 
-**Coverage at session end:** drives 85%+, hash 84.6%, paths covered, profiles 81.9%, rsync 90%+, selection 84.6%, state 83%, codesign 92%, filesystem near-full, lock 75%, preflight (top-level integration) measured via 8 tests.
+**Critical: dispatch protocol amendment (2026-06-04, post-CI-rescue).** Every implementer subagent MUST run `make lint && make coverage` locally before committing. The previous foundation phase's implementers shipped without these, accumulating 10 consecutive red CI runs (Tasks 12-20) that the BACKLOG falsely recorded as green. The coverage gate also had a latent bug where it took only the FIRST subpackage's percentage (alphabetical) and masked under-80% subpackages; this is now fixed in `b17dc22`. Statement-weighted tree totals are the gate going forward.
+
+**Coverage at session end (true tree-weighted, per new gate in `b17dc22`):**
+- runner: vacuously covered (types only)
+- hash: 81.8%
+- state: 83.0%
+- preflight: 83.0%
+
+Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock subpackage at 75.4% was masked. Aggregate tree number is honest at 83.0%.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro` (private, GPLv3). Local: `/Users/maheshm/Documents/1-AI-Projects/Utilities/Backup-Mac/`.
 
@@ -77,6 +84,41 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04: Resume session - Tasks 19, 20 reviewed + Task 21 implemented + CI rescue
+
+Context: previous session ended having pushed Tasks 19 (volume_uuid + drives.Query promotion) and 20 (preflight integrate) implementer-only, deferring combined reviews. The BACKLOG claimed CI was green through Task 18.
+
+Reality on resume diverged:
+- CI was actually RED on the last 10 commits (Tasks 12 through 20 plus the session-end docs commit). The screenshot MM shared mid-session showed "test Failed" on every run.
+- Root causes (compounding):
+  1. golangci-lint errcheck on `defer h.Release()` and `defer pc.Release()` (5 sites flagged, 8 sites real after fix; max-same-issues default truncated the report).
+  2. gosec G115 on `uint64(stat.Dev)` in symlink.go (false-positive on bounded device-id ABI).
+  3. gosec G204 on `/bin/ps` exec.Command and `rsync` exec.CommandContext (false-positives on absolute path + SHA256-verified path).
+  4. Coverage gate failing on preflight at 79.7%: `VerifyVolumeUnchanged` at 55.6%, four uncovered error branches.
+  5. After fix #4, coverage gate itself had a latent bug: it took only the first subpackage's percentage (alphabetical), masking lock at 75.4% under codesign at 92%.
+- Each fix exposed the next; six commits to reach honest green CI.
+
+Commits this session (in order):
+- `779a43e fix(lint): clear errcheck on defer Release; gosec G115/G204 on bounded inputs` — Action 0
+- `1c4085e fix(preflight/volume_uuid): Task 19 review fixes (doc typo, LC_ALL=C)` — Action 1 (Task 19 review applied)
+- `f552cbf fix(preflight): Task 20 review fixes + coverage rescue to 84.8%` — Action 2 (Task 20 review applied + 4 new VerifyVolumeUnchanged tests)
+- `2cf71c1 docs(plan): reconcile PreflightContext API Contracts with Task 20 code` — Action 3
+- `7fda0e1 feat(runner): add runner types (Phase, Mode, UIEvent, RunOptions, RunResult) [Task 21]` — Action 4 implementer
+- `d941105 fix(runner/types): Task 21 review fixes` (added 5 ExitStatus constants, state diagram T1-fail-through-T2 correction, signal-handler 5s clarification, 2 new tests)
+- `e0f003d docs(plan): relocate Renderer interface to runner/types; expand ExitStatus list` (plan amendment per Task 21 review finding)
+- `b17dc22 fix(coverage): tree-weighted gate; handle no-statement packages` (Makefile honesty fix; new gate aggregates via -coverprofile + go tool cover -func)
+
+Key design corrections that landed in this session:
+- `PreflightContext` reconciled in the plan with the actual code shape (`VolumeUUID *volume_uuid.Captured` not `string`; `RsyncPath` not `EmbeddedRsyncPath`; `SymlinkBaseline`, `Filesystem`, `DotDir` added; `Options` struct with `SkipCodesign` test escape; `Release()` method).
+- `Renderer` interface relocated from `internal/plain` to `internal/runner/types` — the import-cycle fix. Plan's API Contracts updated; internal/plain (Task 33) now implements `runner.Renderer`.
+- ExitStatus constants now exported from `runner/types` (5 values matching spec section 5; `crashed_resumed` was missing from the plan but present in the spec).
+- Coverage gate now reports honest statement-weighted totals across the whole package tree; old gate had been silently masking under-80% subpackages.
+
+Follow-ups queued (not blocking):
+- Spec invariant #11 still uses pre-refinement "assume current, warn, rewrite" wording for version.json corruption; refined intent (FAIL-CLOSED, never silently re-init) lives in `internal/state/version.go:44-46`. Spec-doc patch needed.
+- T1-T2 fail-flow narrative in spec section 3 / Task 20 review finding 1.2: spec table predates codesign + volume_uuid invariants; could be tightened.
+- Lock subpackage at 75.4% is below 80% (was masked by old gate). Tree-weighted preflight is 83% so the gate passes, but lock specifically would benefit from more error-path tests (T15 review noted some already; a few more would help).
 
 ### 2026-06-04: Tasks 11-20 executed (integration phase complete)
 - Switched from sequential to overlap-CI mode mid-session: dispatch task N+1 implementer in parallel with task N review subagent. CI runs in background. Saved 1-2 min per task.
