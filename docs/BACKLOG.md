@@ -2,12 +2,30 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-03)
+## Project status (2026-06-04)
 
-**Phase:** Plan 1 (core engine + minimal CLI) saved. Ready for execution via subagent-driven development. Plan 2 (TUI + packaging + docs) to be written when Plan 1 nears completion.
+**Phase:** Plan 1 execution in progress via subagent-driven development. Foundation packages (Tasks 1-9) complete + Task 10 (drives) complete. Integration phase (Tasks 11-20) in progress.
+
+**Repo:** `https://github.com/maheshmirchandani/Backup-Pro` (private, GPLv3). Local: `/Users/maheshm/Documents/1-AI-Projects/Utilities/Backup-Mac/`.
+
+**Latest CI green:** confirmed after fix for gosec G306 (commit `f0cf05c`). Per-package coverage real: hash 84.6%, state 83.0%, profiles 81.9%, drives 85.3% (all above 80% gate).
+
+**Tasks complete (10/58):**
+1. Bootstrap (manual): git init, GPLv3, conventions, GitHub Releases-ready
+2. Makefile + golangci-lint + CI workflow (+ 4 code-review fixes + 4 Makefile-guard fixes + coverage-gate correctness fix + gosec G306 test-fixture fix)
+3. `internal/paths` namespace prefix (3 tests)
+4. `internal/hash` streaming SHA256 with sync.Pool + ctx (4 tests + property test + benchmark 2.35 GB/s)
+5. `internal/state` event store (NDJSON + Checkpoint API, 9 tests + 21 subtests)
+6. `internal/state` manifest store + length-prefixed HMAC + stream-gzip (7 tests + property + pipe-separator forgery test)
+7. `internal/state` run log store (two-line model + torn-write recovery, 13 tests + 6 subtests)
+8. `internal/state` version.json (FAIL-CLOSED on corruption, 12 tests)
+9. `internal/profiles` Store + strict glob allowlist (14 tests + 9 subtests)
+10. `internal/drives` macOS volume enumeration via diskutil (5 tests)
+
+**Tasks remaining (48):** 11 (selection), 12 (rsync extract + hardening), 12a (build-rsync.sh), 13 (rsync wrapper), 14 (rsync progress parser), 15 (preflight/lock), 16 (preflight/filesystem), 17 (preflight/symlink), 18 (preflight/codesign), 19 (preflight/volume_uuid), 20 (preflight integrate), 21-29 runner state machine, 30-32 verify, 33 plain renderer, 34-41 CLI subcommands, 42 e2e helpers, 42a fixtures, 43-51 e2e tests, 51a AC-19 tamper test, 51b missing fault hooks, 52 delete confirm, 53 ERROR_CATALOG, 54 README, 55 dogfood tag.
 
 **Plans:**
-- `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, 2477 lines after multi-hat amendments, ~58 tasks including 12a/42a/51a/51b, ~3 to 4 months part-time after re-baseline)
+- `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
 - Plan 2 (TBD; covers TUI + signed/notarized release pipeline + full friend-facing docs)
 
 **Source PRD:** `docs/specs/2026-06-03-1338-flashbackup-prd.md`
@@ -48,6 +66,15 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04: Tasks 1-10 executed via subagent-driven development
+- Mode A locked (rigorous: implementer + spec review + code quality review per task). MM preference saved to memory `feedback_quality_over_speed.md`.
+- Task 1 (bootstrap) done manually (pure boilerplate).
+- Tasks 2-10 each: implementer subagent + combined review subagent + targeted fix patches.
+- Multiple CI fixes landed during foundation execution: 4 code-review findings on Task 2 tooling config, gosec G115 nolint comments, errcheck `defer` cleanup, Makefile guards for not-yet-existing directories (cmd/, test/e2e/), coverage-gate correctness fix (statement-weighted via `go test -cover` instead of buggy per-function average), gosec G306 on test-fixture file modes, go.mod bump from 1.22 to 1.23 forced by `rapid v1.3.0`.
+- Tools installed: Go 1.26.4 via Homebrew, GitHub CLI auth confirmed for maheshmirchandani.
+- Repo conventions: GPLv3 LICENSE, Conventional Commits, error-wrap `<verb> <noun>: %w`, file mode 0600 for HMAC key + 0700 for `.flashbackup/` dir, atomic write-then-rename helper at `state.WriteTmpThenRename`.
+- Coverage discipline: real statement-weighted gate per package; failing if any safety-critical package drops below 80% line.
 
 ### 2026-06-03: Plan 1 multi-hat review + amendments applied
 - Spawned 9 hats in parallel: Senior Go Developer, Hacker / Pen Tester, CISO, DevOps/SRE, Senior QA, DX (Developer Experience), Code Maintainability + Archaeologist, Performance Engineer, Subagent-Execution Reviewer (meta).

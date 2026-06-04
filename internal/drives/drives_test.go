@@ -2,6 +2,7 @@ package drives
 
 import (
 	"context"
+	"errors"
 	"os"
 	"regexp"
 	"runtime"
@@ -92,7 +93,9 @@ func TestQueryVolume_RootMountpoint(t *testing.T) {
 }
 
 // TestEnumerateVolumes_CancelledContext verifies pre-cancelled context
-// short-circuits before any diskutil shellout.
+// short-circuits before any diskutil shellout AND that the returned error
+// chain carries context.Canceled (pinned against future refactors that
+// might mask the original error).
 func TestEnumerateVolumes_CancelledContext(t *testing.T) {
 	requireMacOS(t)
 	// We do NOT require diskutil here: the cancellation must short-circuit
@@ -105,9 +108,8 @@ func TestEnumerateVolumes_CancelledContext(t *testing.T) {
 	if err == nil {
 		t.Fatalf("EnumerateVolumes with cancelled ctx returned nil error; vols=%+v", vols)
 	}
-	// The error chain should carry context.Canceled.
-	if ctx.Err() == nil {
-		t.Fatalf("ctx.Err() should be non-nil after cancel()")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected error chain to contain context.Canceled, got %v", err)
 	}
 }
 
