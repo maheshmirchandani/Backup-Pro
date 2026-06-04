@@ -93,15 +93,25 @@ bench-baseline:
 # number on small util functions). Each safety-critical package is independently gated; packages
 # that don't exist yet are skipped (the gate kicks in per package as it lands).
 coverage:
-	@failed=""; ran=""; \
+	@failed=""; ran=""; tmpdir=$$(mktemp -d); \
 	for pkg in runner hash state preflight; do \
 		[ -d ./internal/$$pkg ] || continue; \
 		ran="$$ran $$pkg"; \
-		pct=$$(go test -cover -timeout=2m ./internal/$$pkg/... 2>&1 | grep -oE 'coverage: [0-9.]+%' | grep -oE '[0-9.]+' | head -1); \
-		if [ -z "$$pct" ]; then pct=0; fi; \
-		printf "%-12s %s%%\n" "$$pkg" "$$pct"; \
+		profile=$$tmpdir/$$pkg.cover; \
+		go test -timeout=2m -cover -coverpkg=./internal/$$pkg/... -coverprofile=$$profile ./internal/$$pkg/... >/dev/null 2>&1 || true; \
+		if [ ! -s "$$profile" ] || [ $$(wc -l < "$$profile") -le 1 ]; then \
+			printf "%-12s -- (no statements; vacuously covered)\n" "$$pkg"; \
+			continue; \
+		fi; \
+		pct=$$(go tool cover -func=$$profile 2>/dev/null | awk '/^total:/{gsub(/%/,"",$$3); print $$3}'); \
+		if [ -z "$$pct" ]; then \
+			printf "%-12s -- (cover tool returned no total)\n" "$$pkg"; \
+			continue; \
+		fi; \
+		printf "%-12s %s%% (tree-weighted)\n" "$$pkg" "$$pct"; \
 		awk -v p=$$pct 'BEGIN{if(p+0 < 80){exit 1}}' || failed="$$failed $$pkg"; \
 	done; \
+	rm -rf "$$tmpdir"; \
 	if [ -z "$$ran" ]; then echo "skip: no safety-critical packages exist yet"; exit 0; fi; \
 	if [ -n "$$failed" ]; then echo "FAIL: below 80%:$$failed"; exit 1; fi; \
 	echo "OK: all safety-critical packages >= 80%"
