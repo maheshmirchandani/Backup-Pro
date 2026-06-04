@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04, end of resume session + Task 22 + cleanup)
+## Project status (2026-06-04 night, end of session after Tasks 22 + 23 + cleanup)
 
-**Phase:** Plan 1 execution. Tasks 1-22 complete + reviewed + applied. Task 22a queued. Both deferred follow-ups closed (spec invariant #11; lock subpackage coverage). CI green. Latest commit: `4403db8 test(preflight/lock): close coverage gap to 80.5%`.
+**Phase:** Plan 1 execution. Tasks 1-23 complete + reviewed + applied. Task 22a queued. Both deferred follow-ups closed (spec invariant #11; lock subpackage coverage). CI green. Latest commit: `af39928 docs(spec+plan): clarify audit-store-mid-phase-failure terminal state`.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -84,6 +84,22 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (latest): Task 23 + spec/plan amendments
+
+Task 23 (`internal/runner/t1_enumerate.go`, phase T0+) dispatched per the revised protocol. Implementer reported runner package coverage at 92.9% with 13 tests. Commit `de5435b`.
+
+Combined review (`a1a75fd` for fixes; `af39928` for doc amendments):
+- Two em-dashes (U+2014) in `t1_enumerate.go` violating global em-dash discipline; replaced with sentence breaks.
+- `Exported via the const` comment was misleading (lowercase = unexported); reworded.
+- `TestRunT1Enumerate_CancelledMidEnumeration` had a comment promising assertions that weren't there. While adding them, discovered a subtle design point: cancellation in this test actually exercises the mid-stream audit-failure branch (NOT the cadenced-cancel branch), because the next EventStore.Append after cancellation returns ctx.Err from NDJSON's entry guard BEFORE the cadenced check at i%256==0 fires. Mid-stream audit-failure branch deliberately skips emitting `phase_aborted` (re-Appending to a just-failed store could compound the error). The test now asserts the only true invariant: `phase_completed` is absent. Updated the test comment to document the two abort paths.
+- Side observation: the cadenced ctx-check is largely dead code under the current NDJSON EventStore. Filed as a low-priority cleanup item in memory.
+
+Doc amendments (`af39928`):
+- Plan Event Kinds table: explicit paragraph that `phase_aborted` is best-effort, skipped when the audit store is the failure mode. Recovery rule documented.
+- Spec section 3 row T0+: footnote that audit-store failure mid-phase may terminate events.ndjson without a closing event; missing closing event is the crashed signal per invariant #10.
+
+Task 23 commits: `de5435b` (impl), `a1a75fd` (review fixes), `af39928` (doc amendments).
 
 ### 2026-06-04 (later): Task 22 + cleanup of two deferred follow-ups
 
