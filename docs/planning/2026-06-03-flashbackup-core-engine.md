@@ -630,7 +630,7 @@ build-faultinject:
 	go build $(GOFLAGS) -tags faultinject -o flashbackup-faultinject ./cmd/flashbackup
 
 test:
-	go test -timeout=2m ./internal/... ./cmd/...
+	go test -timeout=2m ./...
 
 # Per-package test for fast TDD loop:  make test-pkg PKG=./internal/state
 test-pkg:

@@ -107,8 +107,9 @@ func (s *ndjsonManifestStore) computeHMACLocked(e ManifestEntry) string {
 // tuples produce identical canonical strings and therefore identical HMACs.
 // AMENDMENT 2026-06-03 (multi-hat round). See TestHMAC_PipeSeparatorForgeryRejected.
 func writeCanonical(buf *bytes.Buffer, e ManifestEntry) {
-	// binary.Write to bytes.Buffer never returns an error
-	_ = binary.Write(buf, binary.BigEndian, uint32(e.V))
+	// e.V is the schema version, always 1 in v0.1 (bounded by invariant #13).
+	// binary.Write to bytes.Buffer never returns an error.
+	_ = binary.Write(buf, binary.BigEndian, uint32(e.V)) //nolint:gosec // G115: schema_version bounded 1..255
 	writeLenPrefixed(buf, e.Path)
 	_ = binary.Write(buf, binary.BigEndian, e.Size)
 	_ = binary.Write(buf, binary.BigEndian, e.MtimeNS)
@@ -121,7 +122,9 @@ func writeCanonical(buf *bytes.Buffer, e ManifestEntry) {
 // bytes. This is the building block that makes the canonical encoding
 // non-forgeable.
 func writeLenPrefixed(buf *bytes.Buffer, s string) {
-	_ = binary.Write(buf, binary.BigEndian, uint32(len(s)))
+	// Strings here are bounded by macOS PATH_MAX (1024) or short fixed strings.
+	// uint32 conversion is safe under that precondition.
+	_ = binary.Write(buf, binary.BigEndian, uint32(len(s))) //nolint:gosec // G115: bounded by PATH_MAX
 	buf.WriteString(s)
 }
 

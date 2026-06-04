@@ -115,7 +115,7 @@ func TestNDJSONManifestStore_AppendCancelledContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "manifest.ndjson")
 	store, _ := NewNDJSONManifestStore(path, []byte("k"))
-	defer store.Gzip(context.Background())
+	t.Cleanup(func() { _ = store.Gzip(context.Background()) })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	err := store.AppendEntry(ctx, ManifestEntry{V: 1, Path: "x"})
