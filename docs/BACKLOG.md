@@ -2,11 +2,11 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night, after Tasks 22-25 + cleanup)
+## Project status (2026-06-04 night, after Tasks 22-26 + cleanup)
 
-**Phase:** Plan 1 execution. Tasks 1-25 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `6815725 test(runner): Task 25 review polish`.
+**Phase:** Plan 1 execution. Tasks 1-26 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `f95a624 docs(spec+plan): Task 26 review-driven doc amendments`.
 
-**Runner state machine: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) implemented + reviewed. T3 (move-mode delete-source) is next via Task 26.**
+**Runner state machine: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) + T3 (Task 26) implemented + reviewed. T4 finalize is next via Task 27.**
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -87,7 +87,27 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 ## History (newest first)
 
-### 2026-06-04 (latest): Task 25 (T2 hash+compare + manifest write)
+### 2026-06-04 (latest): Task 26 (T3 move-mode delete-source + atomic gate)
+
+Task 26 (`internal/runner/t4_delete_source.go`, phase T3) dispatched per the revised protocol. **The most data-loss-sensitive phase in the whole runner**: implements the atomic gate (invariant #1: any T2 non-verified file blocks ALL deletions), per-file mutation re-stat (invariant #8 defense in depth on top of T2's re-stat), permanent `os.Remove` unlink (not Trash), and `deletion-log.ndjson` for crash recovery with fsync per line.
+
+Implementer commit `e14181b`; 20 tests, runner package coverage 88.0%. **CI failed once** on a gosec G306 (test fixture used WriteFile mode 0o644 instead of 0o600). Pattern was already documented in memory but the implementer missed it. Fixed in `11aab3f`.
+
+Review verdict: **minor-fixes-needed**. One important contract drift: `delete_failed.Details.errno` was required by the canonical Event Kinds table but the producer never populated it (the `deletionLogLine` struct even declared `ErrnoString` with json tag `errno` but it was never assigned). Fixed in `11aab3f` by adding an `errnoString(err error) string` helper that uses `errors.As` against `syscall.Errno` and maps the well-known POSIX names (EACCES, EPERM, ENOENT, EBUSY, EROFS, ENOTEMPTY, EIO). Test assertion added to `TestRunT4DeleteSource_PermissionDenied` for both the audit event AND the deletion-log line.
+
+Doc amendments (`f95a624`):
+- Plan Event Kinds table: paragraph after the table authorizes optional `phase_completed.Details` extensions (`skipped:true` for no-op phases, `gate_blocked:true` + `failed_count:int` for T3 gate, phase-specific counters).
+- Spec section 4: deletion-log.ndjson line schema documented with the full field list (v, path, status, attempted_at, optional errno + error).
+- Plan Task 29 entry: per-phase preconditions spelled out (one Signature per Candidate at T2/T3; Signatures must contain every RelativePath in the verified subset of Candidates at T4); also consumes T2Result.RsyncLogPath + T4Result.DeletionLogPath for the support-bundle path list.
+
+Implementer decisions worth noting (all reviewed and approved):
+- Lstat failure (ENOENT or EACCES) classified as `failed_permission` — fail-safe to denied rather than continuing. Reviewer flagged the ENOENT-as-permission conflation as a minor; not a data-loss risk, just wire-string clarity.
+- Missing baseline signature classified as `skipped_mutated` — fail-closed; matches the sibling pattern in T2.
+- Gate fire emits `phase_completed{gate_blocked:true}` not `phase_aborted` — gate is a protective outcome, not a phase failure. Locked by the new plan amendment.
+
+Task 26 commits: `e14181b` (impl), `11aab3f` (review fixes + gosec G306 rescue), `f95a624` (doc amendments).
+
+### 2026-06-04 (later): Task 25 (T2 hash+compare + manifest write)
 
 Task 25 (`internal/runner/t3_hash_compare.go`, phase T2) dispatched per the revised protocol. Implementer commit `a9a3ec5`; 18 tests, runner package coverage 89.6%. Review verdict: **approve** with minor cleanups only. CI green first try (the `gofmt -s` lesson from Task 24 was applied at dispatch time).
 
