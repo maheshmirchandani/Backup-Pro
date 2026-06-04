@@ -63,32 +63,32 @@ func TestEnumerateVolumes_Smoke(t *testing.T) {
 	}
 }
 
-// TestQueryVolume_RootMountpoint validates the diskutil call and plist parse
-// against the well-known "/" mountpoint. Asserts VolumeName is non-empty and
+// TestQuery_RootMountpoint validates the diskutil call and plist parse
+// against the well-known "/" mountpoint. Asserts Name is non-empty and
 // VolumeUUID is in UUID format (8-4-4-4-12 hex).
-func TestQueryVolume_RootMountpoint(t *testing.T) {
+func TestQuery_RootMountpoint(t *testing.T) {
 	requireMacOS(t)
 	requireDiskutil(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	info, err := queryVolume(ctx, "/")
+	vol, err := Query(ctx, "/")
 	if err != nil {
-		t.Fatalf("queryVolume(/): %v", err)
+		t.Fatalf("Query(/): %v", err)
 	}
-	if info.VolumeName == "" {
-		t.Errorf("VolumeName empty for /; raw info=%+v", info)
+	if vol.Name == "" {
+		t.Errorf("Name empty for /; vol=%+v", vol)
 	}
-	if info.MountPoint != "/" {
-		t.Errorf("MountPoint = %q, want %q", info.MountPoint, "/")
+	if vol.MountPoint != "/" {
+		t.Errorf("MountPoint = %q, want %q", vol.MountPoint, "/")
 	}
 	// VolumeUUID is the stable identity used by Task 19. APFS volumes use
 	// canonical UUID format; HFS+ legacy may use a different format but the
 	// boot volume on any post-Big-Sur Mac is APFS.
 	uuidRE := regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
-	if !uuidRE.MatchString(info.VolumeUUID) {
-		t.Errorf("VolumeUUID %q is not canonical UUID format", info.VolumeUUID)
+	if !uuidRE.MatchString(vol.VolumeUUID) {
+		t.Errorf("VolumeUUID %q is not canonical UUID format", vol.VolumeUUID)
 	}
 }
 

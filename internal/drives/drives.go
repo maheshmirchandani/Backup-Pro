@@ -78,8 +78,8 @@ func EnumerateVolumes(ctx context.Context, includeRoot bool) ([]Volume, error) {
 	// Optionally probe the root volume directly. `/Volumes/` does not
 	// contain "/" as an entry, so includeRoot requires a separate query.
 	if includeRoot {
-		if info, qErr := queryVolume(ctx, "/"); qErr == nil {
-			vols = append(vols, volumeFromRaw(info))
+		if vol, qErr := Query(ctx, "/"); qErr == nil {
+			vols = append(vols, *vol)
 		}
 		// If the root query fails we continue silently; per the contract
 		// above, EnumerateVolumes is best-effort over per-volume failures.
@@ -90,7 +90,7 @@ func EnumerateVolumes(ctx context.Context, includeRoot bool) ([]Volume, error) {
 			return nil, fmt.Errorf("enumerate volumes: %w", err)
 		}
 		mount := filepath.Join(volumesRoot, e.Name())
-		info, qErr := queryVolume(ctx, mount)
+		vol, qErr := Query(ctx, mount)
 		if qErr != nil {
 			// Race with unmount, permission error on a special mount, etc.
 			// Best-effort: skip this candidate.
@@ -99,22 +99,31 @@ func EnumerateVolumes(ctx context.Context, includeRoot bool) ([]Volume, error) {
 		// /Volumes/ may contain a symlink alias to "/" (some macOS configs
 		// expose the boot volume as /Volumes/Macintosh HD). Honor includeRoot
 		// for that case too: if we already added "/" above, don't double-emit.
-		if info.MountPoint == "/" {
+		if vol.MountPoint == "/" {
 			if !includeRoot {
 				continue
 			}
 			// includeRoot=true: we already added "/" via the explicit probe.
 			continue
 		}
-		vols = append(vols, volumeFromRaw(info))
+		vols = append(vols, *vol)
 	}
 	return vols, nil
 }
 
-// queryVolume runs `diskutil info -plist <mountpoint>` and decodes the result.
-// The mountpoint is passed as an argv-separate argument (no shell), so the
-// usual shell-metacharacter concerns do not apply.
-func queryVolume(ctx context.Context, mountpoint string) (*rawVolumeInfo, error) {
+// Query runs `diskutil info -plist <mountpoint>` and returns the decoded
+// Volume. The mountpoint is passed as an argv-separate argument (no shell),
+// so the usual shell-metacharacter concerns do not apply.
+//
+// Consumers (current): internal/preflight/volume_uuid uses Query to capture
+// the destination USB's VolumeUUID at T0 (invariant #30) and to re-verify it
+// at every phase boundary. EnumerateVolumes uses Query as its per-mountpoint
+// probe. The function is safe to call concurrently.
+//
+// The returned *Volume is never nil on success. On error the *Volume is nil
+// and the error chain includes the underlying cause (exec error, plist parse
+// error, or ctx error from CommandContext).
+func Query(ctx context.Context, mountpoint string) (*Volume, error) {
 	cmd := exec.CommandContext(ctx, diskutilPath, "info", "-plist", mountpoint)
 	out, err := cmd.Output()
 	if err != nil {
@@ -124,7 +133,8 @@ func queryVolume(ctx context.Context, mountpoint string) (*rawVolumeInfo, error)
 	if _, err := plist.Unmarshal(out, &info); err != nil {
 		return nil, fmt.Errorf("parse plist for %q: %w", mountpoint, err)
 	}
-	return &info, nil
+	vol := volumeFromRaw(&info)
+	return &vol, nil
 }
 
 // volumeFromRaw projects a rawVolumeInfo into the public Volume shape.
