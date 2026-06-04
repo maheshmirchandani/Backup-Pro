@@ -240,6 +240,16 @@ PREFLIGHT (T0) → ENUMERATE (T0+) → TRANSFER (T1) → HASH + COMPARE (T2) →
 
 **Move-mode manifest fields.** Each manifest line gains `deletion_status`: deleted / skipped_mutated / failed_immutable / failed_permission / null (copy mode).
 
+**`deletion-log.ndjson` line schema (one JSON object per attempted unlink, append-only, fsync per line):**
+
+```
+{"v":1,"path":"Documents/foo.pdf","status":"deleted","attempted_at":"2026-06-03T14:48:24.123456789Z"}
+{"v":1,"path":"Documents/bar.pdf","status":"skipped_mutated","attempted_at":"2026-06-03T14:48:24.234567890Z"}
+{"v":1,"path":"Documents/baz.pdf","status":"failed_permission","attempted_at":"2026-06-03T14:48:24.345678901Z","errno":"EACCES","error":"remove /Volumes/.../baz.pdf: permission denied"}
+```
+
+Fields: `v:int` (schema version), `path:string` (NFC-canonical relative path matching the manifest), `status:string` (one of the four `deletion_status` wire strings above), `attempted_at:string` (RFC3339 with nanoseconds, UTC), `errno?:string` (POSIX errno name when applicable: EACCES / EPERM / ENOENT / EBUSY / EROFS / ENOTEMPTY / EIO; absent when status=deleted or status=skipped_mutated), `error?:string` (wrapped Go error string for forensic context; absent when status=deleted or status=skipped_mutated). File mode 0644 (no secrets; reachable by support tooling without sudo). The line-per-unlink + fsync-per-line cadence is the canonical crash-recovery record (invariant #1 atomic gate, plus orphan-finalizer on next preflight): a partial T3 interrupted by a kernel panic MUST be reconcilable from this file alone.
+
 ## Section 5: Verify command
 
 `flashbackup verify [<run-id> | --all | --check-extras]` is a standalone subcommand. State machine:

@@ -368,6 +368,11 @@ Persisted to `events.ndjson`. Distinct from `runner.UIEventKind` above.
 | `manifest_finalized` | T4 | gzip closed + renamed | `tmp_path`, `final_path` |
 | `run_finished` | T4 | Last event of run; `runs.ndjson` "finished" line written | `exit_status` |
 
+**Optional `Details` extensions for `phase_completed`.** The required field is `duration_ms`. The following extra fields MAY appear on `phase_completed.Details` and downstream parsers (status JSON, support-bundle tooling) must accept them without erroring:
+- `skipped: true` — phase entered but did no work (e.g., T3 in copy mode, T0+ with empty profile selection).
+- `gate_blocked: true` and `failed_count: int` — T3 atomic gate fired (invariant #1); recorded on `phase_completed` rather than `phase_aborted` because the gate is a protective outcome of an otherwise-correct phase, not a phase failure.
+- Phase-specific counters where useful (e.g., T2's `files_total`, `files_verified`).
+
 ### Fault-injection DSL grammar
 
 Build tag `faultinject` (Task 28). Flag: `--inject <spec>`. Grammar:
@@ -2468,7 +2473,7 @@ git commit -m "feat(profiles): add profile schema and CRUD with glob validation"
 - **Task 26:** `internal/runner/t4_delete_source.go` (renamed). Move-mode atomic gate + per-file mutation re-stat (re-stat via syscall, not hash). Unlink + append to `deletion-log.ndjson` (fsync per unlink). Emit `atomic_gate_blocked` if gate triggers. Includes `permission-denied` fault hook for AC.
 - **Task 27:** `internal/runner/t5_finalize.go` (renamed). Manifest already gzip-streamed (per Task 6); rename `.tmp.gz → .gz`, fsync parent dir. Append "finished" line. Prune old run dirs (10 default). Emit `manifest_finalized` + `run_finished`.
 - **Task 28:** `internal/runner/faultinject.go` (build tag `faultinject`) + `faultinject_release.go` (no-op stubs; file header MUST say "DO NOT DELETE: release binary won't link without this"). Implements the DSL grammar from API Contracts (`corrupt|kill|mutate-source|unmount|disk-full|permission-denied` × `phase|file|after_pct|after_count`). Provides CI release gate: `make verify-release` runs `nm | grep faultinject` (already added to Task 2 Makefile).
-- **Task 29:** `internal/runner/runner.go` top-level state machine. Integrates T0-T5 with `signal.NotifyContext(SIGINT, SIGTERM)`. Per API Contracts: `Run(ctx, opts) (*RunResult, error)`. Calls `PreflightContext.VerifyVolumeUnchanged` at every phase boundary.
+- **Task 29:** `internal/runner/runner.go` top-level state machine. Integrates T0-T5 with `signal.NotifyContext(SIGINT, SIGTERM)`. Per API Contracts: `Run(ctx, opts) (*RunResult, error)`. Calls `PreflightContext.VerifyVolumeUnchanged` at every phase boundary. **Preconditions enforced before each phase**: (a) `T2Input.Candidates` and `T1Result.Signatures` must agree on RelativePaths (one Signature per Candidate); (b) `T3Input.Signatures` and `T3Input.Candidates` likewise; (c) when invoking `RunT4DeleteSource` in move mode, `T4Input.Signatures` must contain every RelativePath in the verified subset of Candidates (the t4 code has a defensive fallback for missing signatures but the orchestrator should never reach it). Also consumes `T2Result.RsyncLogPath` and `T4Result.DeletionLogPath` for the support-bundle path list embedded in `RunResult` / runs.ndjson "finished" line.
 - **Task 30:** `internal/verify/load` manifest reader. Pipeline (per Subagent-Execution hat): open gzip stream → `ReadVersionFile` (fail-closed; no init) → reject if `schema_version != 1` → decode each line + `VerifyHMAC` inline (using length-prefixed canonical) → return `(entries, integrityErrors, schemaErrors)`. Tampered entries return `integrityErrors`, not silent skip.
 - **Task 31:** `internal/verify/rehash` per-file rehash + classify (`verified` / `size_mismatch` / `hash_mismatch` / `missing` / `unreadable`). Emit `UIEvent{Kind:UIEvtProgress}` for renderer.
 - **Task 32:** `internal/verify/verify.go` top-level. Per API Contracts: `Verify(ctx, opts) (*VerifyResult, error)`. Includes `FilesIntegrityFailed` counter (AC-19). Writes `<run-dir>/verifications/<verify-id>/summary.json` with locked schema (Section 9 / API Contracts).
