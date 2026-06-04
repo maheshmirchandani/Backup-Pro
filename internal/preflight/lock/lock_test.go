@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAcquire_HappyPath(t *testing.T) {
@@ -149,6 +150,35 @@ func TestAcquire_StaleRecovery_WrongHost(t *testing.T) {
 	h, err := Acquire(context.Background(), path, "vol")
 	if err != nil {
 		t.Fatalf("Acquire over wrong-host lock should succeed: %v", err)
+	}
+	defer h.Release()
+}
+
+// TestAcquire_StaleRecovery_RecycledPID covers the novel start_time-based
+// detection path: a lock file points at THIS process's PID (which is alive)
+// but with a start_time recorded ~1 hour earlier than the current process
+// actually started. The 5s tolerance should classify this as a recycled
+// PID and recover the lock rather than treat it as held by a live process.
+func TestAcquire_StaleRecovery_RecycledPID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lock")
+	staleLock := Lock{
+		PID:           os.Getpid(),
+		StartTimeUnix: time.Now().Add(-1 * time.Hour).Unix(),
+		HostUUID:      getHostUUID(),
+		Nonce:         "stale",
+		VolumeUUID:    "vol",
+	}
+	data, err := json.Marshal(&staleLock)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+	h, err := Acquire(context.Background(), path, "vol")
+	if err != nil {
+		t.Fatalf("Acquire over recycled-PID lock should succeed: %v", err)
 	}
 	defer h.Release()
 }

@@ -47,8 +47,10 @@ type HeldLockError struct {
 }
 
 func (e *HeldLockError) Error() string {
-	return fmt.Sprintf("lock held by PID=%d host=%s since %s; run 'flashbackup status' for details",
-		e.Holder.PID, e.Holder.HostUUID, time.Unix(e.Holder.StartTimeUnix, 0).Format(time.RFC3339))
+	since := time.Unix(e.Holder.StartTimeUnix, 0)
+	age := time.Since(since).Round(time.Second)
+	return fmt.Sprintf("lock held by PID=%d host=%s since %s (%s); run 'flashbackup status' for details",
+		e.Holder.PID, e.Holder.HostUUID, since.Format(time.RFC3339), age)
 }
 
 // Unwrap exposes the sentinel for errors.Is checks.
@@ -253,11 +255,14 @@ func processAlive(pid int) bool {
 }
 
 // processStartTimeUnix returns the start time of a running process by
-// parsing `ps -o lstart= -p <pid>` output. On macOS and Linux ps produces
-// the same format (e.g. "Wed Jun  4 12:34:56 2026") when called with
-// LANG=C / default locale.
+// parsing `ps -o lstart= -p <pid>` output. Force LC_ALL=C so the date
+// format is the canonical English "Wed Jun  4 12:34:56 2026" regardless
+// of the user's locale (without this, a French/German/Japanese macOS
+// would silently fail to parse, treating every lock as held).
 func processStartTimeUnix(pid int) (int64, error) {
-	out, err := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("ps -o lstart for pid %d: %w", pid, err)
 	}

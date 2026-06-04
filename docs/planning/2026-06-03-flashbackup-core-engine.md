@@ -184,7 +184,11 @@ type Lock struct {
     VolumeUUID     string    `json:"volume_uuid"`  // pinned via PS-spec invariant #30
 }
 
-func AcquireLock(ctx context.Context, path string) (*LockHandle, error)
+// Acquire is the implemented name (Go style: avoid package-name stuttering at
+// lock.AcquireLock vs lock.Acquire). volumeUUID is captured at T0 from
+// drives.queryVolume / volume_uuid.Capture and stored in the Lock JSON for
+// per-phase invariant #30 cross-checks.
+func Acquire(ctx context.Context, lockFilePath, volumeUUID string) (*LockHandle, error)
 func (h *LockHandle) Release() error
 
 type PreflightContext struct {
