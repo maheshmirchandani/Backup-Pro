@@ -2,11 +2,13 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night, after Tasks 22-26 + cleanup)
+## Project status (2026-06-04 night, after Tasks 22-27 + cleanup; PAUSE for next session)
 
-**Phase:** Plan 1 execution. Tasks 1-26 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `f95a624 docs(spec+plan): Task 26 review-driven doc amendments`.
+**Phase:** Plan 1 execution. Tasks 1-27 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `2f35c7b fix(runner): Task 27 review fixes (minor style)`.
 
-**Runner state machine: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) + T3 (Task 26) implemented + reviewed. T4 finalize is next via Task 27.**
+**Runner state machine COMPLETE for all six phases: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) + T3 (Task 26) + T4 (Task 27). The per-phase functions all exist as siblings in `internal/runner/`. Remaining runner work: Task 28 (faultinject build-tagged DSL + symbol scan) and Task 29 (top-level `runner.Run` state machine that stitches the six phases together).**
+
+**Next session resume protocol:** Start with Task 28 (`internal/runner/faultinject.go` + `internal/runner/faultinject_release.go`). Build tag `faultinject`. Implements the DSL grammar from API Contracts (`corrupt|kill|mutate-source|unmount|disk-full|permission-denied` × `phase|file|after_pct|after_count`). Provides CI release gate: `make verify-release` runs `nm | grep faultinject` (already added to Task 2 Makefile). Release stub file at `faultinject_release.go` must say "DO NOT DELETE: release binary won't link without this".
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -87,7 +89,26 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 ## History (newest first)
 
-### 2026-06-04 (latest): Task 26 (T3 move-mode delete-source + atomic gate)
+### 2026-06-04 (latest): Task 27 (T4 finalize) - runner state machine COMPLETE
+
+Task 27 (`internal/runner/t5_finalize.go`, phase T4) dispatched per the revised protocol. The LAST runner phase: gzip-finalizes the manifest (rename .tmp.gz → .gz + fsync parent dir via existing `ManifestStore.Gzip`), writes the runs.ndjson "finished" line via `RunLogStore.AppendFinished` (invariant #10 two-line model), prunes old run dirs beyond the 10-default retention limit, and emits `manifest_finalized` + `run_finished` audit events.
+
+Implementer commit `0d4572a`; 19 test functions / 24 subtests; runner package coverage 89.9%. **First task this session to clear all 6 pre-commit checks on the first push** (the implementer ran `gofmt -s -l` AND used 0o600 fixtures correctly — the cumulative lessons from Tasks 24 + 26 CI rescues paid off).
+
+Review verdict: **approve**. Two minor optional cleanups applied as a style-only follow-up (`2f35c7b`):
+- Renamed `t5Abort` / `t5AbortOnAuditFail` to `runT5Abort` / `runT5AbortOnAuditFail` to match the sibling `runT1Abort` / `runT3Abort` / `runT4Abort` naming convention across the package.
+- Dropped the dead `phaseWire` parameter from `runT5AbortOnAuditFail` (it was hardcoding `types.PhaseFinalize` anyway).
+
+Implementer decisions (all reviewed and approved as documented):
+- Prune is audit-silent on RemoveAll failures (no new `run_pruned` event Kind invented; stale dir remains for next-run retry).
+- `RetentionLimit ≤ 0` defaults to 10.
+- Order: phase_started → ManifestStore.Gzip → manifest_finalized → AppendFinished → RunLogStore.Checkpoint → prune → phase_completed → run_finished → EventStore.Checkpoint. Manifest durable before "finished" line (verify reads manifest); finished line durable before `run_finished` audit (compound-failure guard).
+
+Task 27 commits: `0d4572a` (impl), `2f35c7b` (style polish per review).
+
+**Status at session pause:** all six runner phase functions exist as siblings in `internal/runner/`. Runner package tree-weighted coverage 89.9%; preflight 84.9%; state 83.0%; hash 81.8%. CI green at `2f35c7b`. Memory file updated. Next session begins with Task 28.
+
+### 2026-06-04 (later): Task 26 (T3 move-mode delete-source + atomic gate)
 
 Task 26 (`internal/runner/t4_delete_source.go`, phase T3) dispatched per the revised protocol. **The most data-loss-sensitive phase in the whole runner**: implements the atomic gate (invariant #1: any T2 non-verified file blocks ALL deletions), per-file mutation re-stat (invariant #8 defense in depth on top of T2's re-stat), permanent `os.Remove` unlink (not Trash), and `deletion-log.ndjson` for crash recovery with fsync per line.
 
