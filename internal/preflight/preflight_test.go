@@ -114,7 +114,7 @@ func TestPreflight_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
-	defer pc.Release()
+	t.Cleanup(func() { _ = pc.Release() })
 
 	if pc.DestRoot == "" {
 		t.Error("DestRoot empty")
@@ -238,7 +238,7 @@ func TestPreflight_VerifyVolumeUnchanged_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
-	defer pc.Release()
+	t.Cleanup(func() { _ = pc.Release() })
 	if err := pc.VerifyVolumeUnchanged(ctx); err != nil {
 		t.Errorf("VerifyVolumeUnchanged on unchanged dest: %v", err)
 	}

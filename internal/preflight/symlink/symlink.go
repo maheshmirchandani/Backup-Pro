@@ -88,8 +88,10 @@ func WalkAndBaseline(ctx context.Context, destPath string) (*Baseline, error) {
 			return nil, fmt.Errorf("lstat %q: cannot extract syscall.Stat_t", comp)
 		}
 		base.Components = append(base.Components, ComponentInfo{
-			Path:  comp,
-			Dev:   uint64(stat.Dev),
+			Path: comp,
+			// G115: stat.Dev is int32 on darwin and uint32 on linux; both
+			// fit losslessly in uint64. Bounded by the OS-defined device id space.
+			Dev:   uint64(stat.Dev), //nolint:gosec
 			Ino:   uint64(stat.Ino),
 			IsDir: info.IsDir(),
 		})

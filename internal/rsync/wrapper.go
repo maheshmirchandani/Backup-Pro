@@ -92,7 +92,9 @@ func (w *Wrapper) Run(ctx context.Context, opts Options) error {
 
 	args := buildArgs(opts)
 
-	cmd := exec.CommandContext(ctx, opts.ExecPath, args...)
+	// G204: opts.ExecPath is the SHA256-verified extracted rsync binary path
+	// from Task 12; args are constructed by buildArgs() from validated opts.
+	cmd := exec.CommandContext(ctx, opts.ExecPath, args...) //nolint:gosec
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 

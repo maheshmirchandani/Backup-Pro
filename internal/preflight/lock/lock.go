@@ -260,7 +260,9 @@ func processAlive(pid int) bool {
 // of the user's locale (without this, a French/German/Japanese macOS
 // would silently fail to parse, treating every lock as held).
 func processStartTimeUnix(pid int) (int64, error) {
-	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	// G204: absolute path to /bin/ps; pid is a validated int parsed from the
+	// lock JSON. No shell, no user-supplied strings.
+	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid)) //nolint:gosec
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	out, err := cmd.Output()
 	if err != nil {

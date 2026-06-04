@@ -17,7 +17,7 @@ func TestAcquire_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("lock file should exist: %v", err)
@@ -71,7 +71,7 @@ func TestAcquire_HeldByLiveProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Acquire: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 
 	_, err = Acquire(context.Background(), path, "vol")
 	if err == nil {
@@ -114,7 +114,7 @@ func TestAcquire_StaleRecovery_DeadPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire over dead-PID lock should succeed: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 
 	// Confirm the new lock replaced the stale one.
 	data, err = os.ReadFile(path)
@@ -151,7 +151,7 @@ func TestAcquire_StaleRecovery_WrongHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire over wrong-host lock should succeed: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 }
 
 // TestAcquire_StaleRecovery_RecycledPID covers the novel start_time-based
@@ -180,7 +180,7 @@ func TestAcquire_StaleRecovery_RecycledPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire over recycled-PID lock should succeed: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 }
 
 func TestAcquire_StaleRecovery_Corrupted(t *testing.T) {
@@ -193,7 +193,7 @@ func TestAcquire_StaleRecovery_Corrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire over corrupted lock should succeed: %v", err)
 	}
-	defer h.Release()
+	t.Cleanup(func() { _ = h.Release() })
 }
 
 func TestAcquire_RefusesSymlink(t *testing.T) {
