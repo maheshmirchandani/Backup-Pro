@@ -923,7 +923,7 @@ Items raised in review but consciously deferred. Recorded so they aren't lost.
 | 8 | Gzip manifests at rest (`manifest.ndjson.gz`). | Drawback analysis |
 | 9 | UTC ISO timezone in run IDs (`YYYY-MM-DDTHHMMZ-<hex>`). | Drawback analysis |
 | 10 | Torn-write recovery: skip unparseable runs.ndjson lines with warning. | Drawback analysis |
-| 11 | version.json corruption recovery: assume current, warn, rewrite. | Drawback analysis |
+| 11 | version.json corruption: FAIL-CLOSED. `ReadVersionFile` returns an error on parse failure, schema mismatch, or HMAC-key length mismatch; the runner refuses to start. The only re-creation path is an explicit `InitVersionFile(path, version, force=true)` invoked by `flashbackup init --reset-keys`, which rotates the HMAC key and invalidates all prior manifests. NEVER silently re-init on corruption. | Drawback analysis + Plan 1 multi-hat review 2026-06-03 (Senior Security Engineer + CISO) |
 | 12 | `chmod 555` on the binary at install time. | Drawback analysis |
 | 13 | No in-binary forward-compat migration code in v0.1. Keep `schema_version` field only. | CTO hat (round 2) |
 | 14 | Split `runner` into `preflight` + `runner` packages. | Enterprise Architect hat |
