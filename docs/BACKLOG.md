@@ -2,9 +2,11 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night, after Tasks 22, 23, 24 + cleanup)
+## Project status (2026-06-04 night, after Tasks 22-25 + cleanup)
 
-**Phase:** Plan 1 execution. Tasks 1-24 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `b7026eb fix(runner+rsync): Task 24 review fixes; export BuildArgs`.
+**Phase:** Plan 1 execution. Tasks 1-25 complete + reviewed + applied. Task 22a queued. CI green. Latest commit: `6815725 test(runner): Task 25 review polish`.
+
+**Runner state machine: T0 (Task 22) + T0+ (Task 23) + T1 (Task 24) + T2 (Task 25) implemented + reviewed. T3 (move-mode delete-source) is next via Task 26.**
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -85,7 +87,25 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 ## History (newest first)
 
-### 2026-06-04 (latest): Task 24 + Task 24 review fixes
+### 2026-06-04 (latest): Task 25 (T2 hash+compare + manifest write)
+
+Task 25 (`internal/runner/t3_hash_compare.go`, phase T2) dispatched per the revised protocol. Implementer commit `a9a3ec5`; 18 tests, runner package coverage 89.6%. Review verdict: **approve** with minor cleanups only. CI green first try (the `gofmt -s` lesson from Task 24 was applied at dispatch time).
+
+Per-file inner loop locked: `os.Lstat` source for mutation gate (size + mtime_ns from T0+ Signature; if changed → status `source_mutated`, skip both hashes); open + StreamSHA256 source; open + StreamSHA256 dest; classify into one of {verified, hash_mismatch, source_mutated, not_transferred, source_unreadable, dest_unreadable}; emit per-file event (file_completed | hash_mismatch | source_mutated); append manifest entry with HMAC via length-prefixed canonical encoding (invariant #33); emit UIEvtFileCompleted. Per-file errors are NOT fatal; they are recorded as FileStatus and the loop continues. Audit AND manifest Append failures ARE fatal.
+
+`T3Result.PerFileStatus` (`map[string]state.FileStatus` keyed by RelativePath) is consumable by Task 26 (atomic gate decision: `FilesVerified == FilesTotal`).
+
+Review-polish commit `6815725` applied:
+- CancelledMidLoop now asserts at least one per-file event landed (locks the "partial files processed" claim).
+- RendererErrorIsNonFatal now asserts the broken renderer was called 3 times (locks renderer is exercised, not bypassed on first error).
+- SourceMutated also asserts the sibling stable.txt classifies as verified (locks: mutation on one file doesn't poison classification of others).
+- New EmptyCandidates test locks the zero-file contract (phase_started + phase_completed, no per-file events).
+
+Deferred (not blocking Task 26): runT3Abort at 0% coverage (cadenced-cancel dead code), asymmetric phase_aborted policy on manifest-Append failure (audit store is healthy in that branch so phase_aborted COULD be emitted), T3Input.Mode declared but unread (forward-compat).
+
+Task 25 commits: `a9a3ec5` (impl), `6815725` (review polish).
+
+### 2026-06-04 (later): Task 24 + Task 24 review fixes
 
 Task 24 (`internal/runner/t2_transfer.go`, phase T1) dispatched per the revised protocol. Implementer commit `7dcce88` shipped but CI failed at the `Lint` step on `gofmt -s` drift. The bare `gofmt -l` check the implementer ran did not catch doc-comment list-indent shapes that `gofmt -s` (the simplifier; what golangci-lint enforces) rewrites. Caught and fixed in `b7026eb`. Lesson added to memory: local pre-commit must run `gofmt -s -l`.
 
