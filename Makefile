@@ -3,18 +3,30 @@
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 export SOURCE_DATE_EPOCH
 
-GOFLAGS := -trimpath -buildvcs=false -ldflags "-s -w -buildid="
+GOFLAGS := -trimpath -buildvcs=false
+
+# LDFLAGS for release builds: strip symbols, strip buildid, and flip the
+# codesign.IsReleaseBuild string var to "true" so the per-launch codesign
+# self-verify gate runs against the on-disk binary (spec invariant #29 /
+# Task 18). Dev builds (go run, go test, plain go build) leave IsReleaseBuild
+# at its compile-time default of "false" and skip the gate.
+LDFLAGS_RELEASE := -s -w -buildid= -X github.com/maheshmirchandani/Backup-Pro/internal/preflight/codesign.IsReleaseBuild=true
+
+# LDFLAGS for the faultinject build: same symbol/buildid stripping as release
+# but IsReleaseBuild stays "false" so codesign isn't invoked against an
+# unsigned faultinject artifact during fault-injection e2e runs.
+LDFLAGS_FAULTINJECT := -s -w -buildid=
 
 build:
 	@if [ -d ./cmd/flashbackup ]; then \
-		go build $(GOFLAGS) -tags release -o flashbackup ./cmd/flashbackup; \
+		go build $(GOFLAGS) -tags release -ldflags "$(LDFLAGS_RELEASE)" -o flashbackup ./cmd/flashbackup; \
 	else \
 		echo "skip: ./cmd/flashbackup does not exist yet"; \
 	fi
 
 build-faultinject:
 	@if [ -d ./cmd/flashbackup ]; then \
-		go build $(GOFLAGS) -tags faultinject -o flashbackup-faultinject ./cmd/flashbackup; \
+		go build $(GOFLAGS) -tags faultinject -ldflags "$(LDFLAGS_FAULTINJECT)" -o flashbackup-faultinject ./cmd/flashbackup; \
 	else \
 		echo "skip: ./cmd/flashbackup does not exist yet"; \
 	fi
