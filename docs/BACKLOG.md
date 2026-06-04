@@ -2,11 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night session, after Task 28)
+## Project status (2026-06-04 night session, after Task 29 + Task 28 review fixes)
 
-**Phase:** Plan 1 execution. Tasks 1-28 complete. CI green at `6e958fe`. Task 28 review + Task 29 implementer dispatching now in overlap-CI pattern.
-
-**Runner state machine COMPLETE (Task 22-27) + fault-injection DSL + release stub COMPLETE (Task 28). Remaining runner work: Task 29 (top-level `runner.Run` state machine that stitches the six phase functions together via signal handler, RunID generation, store opening, atomic gate decision, ExitStatus resolution, faultinject.Hook insertions at instrumented call sites).**
+**Phase:** Plan 1 execution. Tasks 1-29 complete. CI green at `8461b0f`. RUNNER PACKAGE COMPLETE end-to-end: T0 through T4 phases, fault-injection harness, top-level `runner.Run` orchestrator with signal handling and atomic gate decision. Next: Task 30 (`internal/verify/load` manifest reader).
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -30,7 +28,7 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 
 **Latest CI green:** confirmed after fix for gosec G306 (commit `f0cf05c`). Per-package coverage real: hash 84.6%, state 83.0%, profiles 81.9%, drives 85.3% (all above 80% gate).
 
-**Tasks complete (28/58):**
+**Tasks complete (29/58):**
 1. Bootstrap (manual): git init, GPLv3, conventions, GitHub Releases-ready
 2. Makefile + golangci-lint + CI workflow (+ 4 code-review fixes + 4 Makefile-guard fixes + coverage-gate correctness fix + gosec G306 test-fixture fix)
 3. `internal/paths` namespace prefix (3 tests)
@@ -86,6 +84,31 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (later night): Task 28 review fixes + Task 29 (runner.Run state machine)
+
+Task 28 combined review (commit `6e958fe`) returned a single important finding plus minor follow-ups. The important one was structurally significant: `LDFLAGS_RELEASE` and `LDFLAGS_FAULTINJECT` both passed `-s -w`, which strips the Go symbol table. With `-s` applied, `go tool nm flashbackup` returns only ~58 dynamic libc symbols, so the invariant #35 release-gate grep `(^|[._/])faultinject` was structurally a no-op against the actually-built binary. The implementer's claim that `faultinjectBuildTagPresent` is the gate's grep target was correct in principle but unverifiable against the stripped binary.
+
+Fix landed in `8461b0f`: dropped `-s` from both LDFLAGS (kept `-w` for DWARF strip). Costs ~1MB in binary size; pays for itself by making the release gate actually have signal to scan. Spec amendments: build pipeline table row updated to `-w -buildid=` (not `-s -w -buildid=`), rationale row updated to explain the deliberate `-s` omission, invariant #35 row expanded to spell out the gate implementation, the build-flag requirement, and the `ErrFaultinjectStripped` mixed-case safety note. Plan amendment under DSL grammar block: canonical Point wire-string set documented (`T1-pre`, `T1`, `T1-post`, `T2-pre`, `T2`, `T3-pre`, `T3`) so future hook sites cannot drift from the constant set in code. Minor: `parseOne` now has a comment documenting why colon-split is safe on macOS APFS/HFS+ paths.
+
+Task 29 (`internal/runner/runner.go`) dispatched in parallel with the Task 28 review per the overlap-CI protocol. The top-level orchestrator: generates RunID in canonical format via `crypto/rand`; opens EventStore + RunLogStore before T0 (T0 takes them as inputs); opens ManifestStore after T0 (needs `pc.VersionFile.HMACKey`); threads `PreflightContext.VerifyVolumeUnchanged` at every phase boundary; computes the namespaced destination `<DestRoot>/<hostname>-<username>/` per invariant #14; enforces the atomic gate (move mode + non-100% verified = skip T4 unlink, set `ExitStatus = "copy_only_aborted_delete"`); always runs T5 finalize so the manifest and runs.ndjson finished line land regardless. Instruments T1/T2/T3 phase files with `faultinject.Hook` calls at the seven canonical Point locations; hook firing in T1 cancels the rsync child context and prefers the hook error over the resulting "killed" error. Precondition assertions code as panics (signature-cover-candidates at T2 entry; verified-subset coverage at T3 entry) since a violation indicates an upstream T0+ bug, not user input.
+
+Implementer commit `da24cd1`; 17 new tests (14 in `runner_test.go` + 3 in `runner_faultinject_test.go`); runner package coverage 83.5% (below the 85% sub-target; gate is 80%). CI green first try across all four jobs (test, bench, e2e-fast, e2e-safety). Coverage shortfall is in the `Run` function itself (66.9% per-function): the various intermediate phase-error returns and VerifyVolumeUnchanged failure branches need either an interface seam in PreflightContext or a gocovmerge across faultinject + release runs. Driving them without invasive seams is impractical in this task.
+
+Design decisions worth recording:
+- `newRunID(startedAt time.Time)` takes startedAt as a parameter so the RunID's timestamp portion and the reported `RunResult.StartedAt` cannot drift.
+- Store-open order: EventStore + RunLogStore BEFORE T0 (T0 needs them as inputs); ManifestStore AFTER T0 (needs HMAC key from preflight). Three deferred Close paths.
+- Pre-T0 minimum dir prep: runner does `os.MkdirAll(<dest>/.flashbackup/runs/<runID>)` before opening stores. T0's preflight still fully validates filesystem, lock, volume UUID.
+- Pre-T0 failure path: `emitPreflightFailedSummary` returns `(result, err)` (not `(nil, err)`) so the caller sees `RunResult{ExitStatus:"preflight_failed", RunID, FinishedAt}` even on pre-T0 errors.
+- Test seam for rsync override: `rsyncPathOverrideForTest` package-private var (matches the `deletionLogTestHook` pattern in t4) because the embedded rsync is a non-copying placeholder; e2e tests need a real GNU rsync (`brew install rsync` 3.4.3 installed on the dev machine to exercise this).
+- Signal handling: `signal.NotifyContext(ctx, SIGINT, SIGTERM)` at runner entry. Second-signal-within-5s escalation deferred to cmd/main (Task 34).
+
+Punted / surfaced for follow-up:
+- TestRun_VolumeUUIDChangedMidRun skipped because PreflightContext does not expose an injectable VerifyVolumeUnchanged. Recommend a small Task 29a to add an injectable `verifyHookForTest func(ctx) error` to PreflightContext (logged as latent gap; not blocking Task 30+).
+- Coverage 83.5% below 85% sub-target but above 80% gate. Accepted for v0.1; revisit if tests pile up.
+- Faultinject tests don't contribute to standard coverage profile (Makefile coverage target runs without `-tags faultinject`). Acceptable for v0.1.
+
+Task 28-29 commits this segment: `6e958fe` (Task 28 impl), `0bd583d` (Task 28 BACKLOG), `da24cd1` (Task 29 impl), `8461b0f` (Task 28 review fixes).
 
 ### 2026-06-04 (later night): Task 28 (faultinject DSL + release stub)
 
