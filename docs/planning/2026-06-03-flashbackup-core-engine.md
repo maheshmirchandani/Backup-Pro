@@ -342,6 +342,8 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error)
 
 Persisted to `events.ndjson`. Distinct from `runner.UIEventKind` above.
 
+**`phase_aborted` is best-effort, not guaranteed.** When the audit store (EventStore) is itself the failure mode (Append or Checkpoint returned an error mid-phase), the runner intentionally does NOT attempt another Append for `phase_aborted` — re-Appending to a just-failed store risks compounding the original error and writing a misleading second-order failure. In that case the on-disk trail terminates at the last successful `file_*` line. Recovery treats any open `phase_started` without a matching closing event (`phase_completed` or `phase_aborted`) as a crashed phase and finalizes the run as `crashed_resumed` on next preflight (invariant #10 two-line model + `runs.ndjson` absent "finished" line).
+
 | Kind | Phase | When emitted | Required `Details` fields |
 |---|---|---|---|
 | `phase_started` | any | At entry to each phase | none |
