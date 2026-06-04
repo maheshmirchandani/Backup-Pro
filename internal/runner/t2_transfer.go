@@ -111,30 +111,30 @@ type T2Result struct {
 //     escaped because the argv is never re-executed via a shell).
 //  6. Wire a rsync.Parser whose PassThrough is the rsync.log file and
 //     whose OnEvent translates ProgressEvent into:
-//       - ProgressTransferring  -> UIEvtProgress UIEvent with
-//         BytesDone, BytesPerSec, ETASeconds, CurrentFile populated.
-//       - ProgressFileCompleted -> FilesAttempted++ and
-//         BytesTransferred = max(prev, ev.BytesTransferred).
-//       - ProgressSummary       -> captured to the log via PassThrough,
-//         no UIEvent (UI surfaces totals via UIEvtSummary at T4).
-//       - ProgressFileStarted   -> dropped (no canonical Event Kind for
-//         per-file enumeration at T1; per the plan's Event Kinds table,
-//         per-file audit lives at T2 via file_completed).
+//     - ProgressTransferring  -> UIEvtProgress UIEvent with
+//     BytesDone, BytesPerSec, ETASeconds, CurrentFile populated.
+//     - ProgressFileCompleted -> FilesAttempted++ and
+//     BytesTransferred = max(prev, ev.BytesTransferred).
+//     - ProgressSummary       -> captured to the log via PassThrough,
+//     no UIEvent (UI surfaces totals via UIEvtSummary at T4).
+//     - ProgressFileStarted   -> dropped (no canonical Event Kind for
+//     per-file enumeration at T1; per the plan's Event Kinds table,
+//     per-file audit lives at T2 via file_completed).
 //  7. Invoke rsync.Wrapper.Run(ctx, opts) with:
-//       - Archive=true, Partial=true, Xattrs=true, Delete=false
-//         (design spec section 3 row T1; invariant #6).
-//       - Stdout=parser, Stderr=rsync.log file directly.
+//     - Archive=true, Partial=true, Xattrs=true, Delete=false
+//     (design spec section 3 row T1; invariant #6).
+//     - Stdout=parser, Stderr=rsync.log file directly.
 //     Files = candidate RelativePaths.
 //  8. Drain parser.Flush() after Run returns.
-//  9a. On Run error (non-zero exit or ctx cancellation): build T2Result
-//      with ExitCode = rsync.ResolveExitCode(err); transfer_failed
-//      Append (Details: exit_code, error); phase_aborted Append via
-//      runT2Abort (Details: duration_ms, error); UIEvtPhaseCompleted
-//      Status="aborted"; Checkpoint best-effort; return (T2Result,
-//      wrapped err).
-//  9b. On Run success: transfer_completed Append (Details: exit_code=0,
-//      duration_ms); phase_completed Append (Details: duration_ms);
-//      UIEvtPhaseCompleted Status="ok"; Checkpoint; return (T2Result, nil).
+//     9a. On Run error (non-zero exit or ctx cancellation): build T2Result
+//     with ExitCode = rsync.ResolveExitCode(err); transfer_failed
+//     Append (Details: exit_code, error); phase_aborted Append via
+//     runT2Abort (Details: duration_ms, error); UIEvtPhaseCompleted
+//     Status="aborted"; Checkpoint best-effort; return (T2Result,
+//     wrapped err).
+//     9b. On Run success: transfer_completed Append (Details: exit_code=0,
+//     duration_ms); phase_completed Append (Details: duration_ms);
+//     UIEvtPhaseCompleted Status="ok"; Checkpoint; return (T2Result, nil).
 //
 // Audit-write failure policy: EventStore.Append failures for
 // phase_started, transfer_started, transfer_completed, phase_completed
@@ -237,7 +237,21 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 	}); err != nil {
 		// Audit-write failure on transfer_started. Same fatal policy as
 		// phase_started: no further audit writes attempted.
-		return nil, fmt.Errorf("runner T1: append transfer_started: %w", err)
+		//
+		// UI consistency: UIEvtPhaseStarted was already emitted above
+		// (line 208), so a renderer would otherwise be stranded on the
+		// "T1 started" frame. Emit UIEvtPhaseCompleted(aborted) so the
+		// TUI can render the failure even though the audit trail is
+		// truncated. Matches the t1_enumerate.go mid-stream pattern.
+		wrapped := fmt.Errorf("runner T1: append transfer_started: %w", err)
+		emitUI(ctx, in.UIRenderer, types.UIEvent{
+			Kind:      types.UIEvtPhaseCompleted,
+			Phase:     types.PhaseTransfer,
+			Status:    "aborted",
+			Err:       wrapped,
+			Timestamp: time.Now().UTC(),
+		})
+		return nil, wrapped
 	}
 
 	// Empty-Candidates short-circuit: never invoke rsync with no files
@@ -449,42 +463,12 @@ func candidateRelPaths(cands []selection.Candidate) []string {
 // rsyncCommandLine returns a human-readable space-joined argv for
 // transfer_started.details.command_line. NOT shell-escaped because the
 // resulting string is never re-executed via a shell; it exists for
-// support-bundle readability. The argv reconstruction mirrors what
-// rsync.Wrapper.Run will actually exec (ExecPath + buildArgs output).
-//
-// Two callers (test + production) use this; keep it pure / deterministic.
-//
-// Note: rsync.buildArgs is unexported, so we recreate the argv shape
-// here from the same Options fields. If buildArgs changes, this needs
-// to change in lockstep (the rsync package's tests for buildArgs are
-// the source of truth for the wire shape).
+// support-bundle readability. Calls rsync.BuildArgs directly so the
+// audit's command_line is byte-equal to what the subprocess actually
+// executes (single source of truth; no drift trap).
 func rsyncCommandLine(opts rsync.Options) string {
 	parts := make([]string, 0, 16)
 	parts = append(parts, opts.ExecPath)
-	if opts.Archive {
-		parts = append(parts, "-a")
-	}
-	if opts.Partial {
-		parts = append(parts, "--partial")
-	}
-	if opts.Xattrs {
-		parts = append(parts, "--xattrs")
-	}
-	if opts.Sparse {
-		parts = append(parts, "--sparse")
-	}
-	if opts.HardLinks {
-		parts = append(parts, "--hard-links")
-	}
-	if opts.Delete {
-		parts = append(parts, "--delete")
-	}
-	parts = append(parts, "--progress")
-	if len(opts.Files) > 0 {
-		parts = append(parts, "--from0", "--files-from=-")
-	}
-	src := strings.TrimRight(opts.SourceRoot, "/") + "/"
-	parts = append(parts, src, opts.DestRoot)
+	parts = append(parts, rsync.BuildArgs(opts)...)
 	return strings.Join(parts, " ")
 }
-

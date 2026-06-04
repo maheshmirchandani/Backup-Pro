@@ -90,10 +90,10 @@ func (w *Wrapper) Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("rsync run: DestRoot is empty")
 	}
 
-	args := buildArgs(opts)
+	args := BuildArgs(opts)
 
 	// G204: opts.ExecPath is the SHA256-verified extracted rsync binary path
-	// from Task 12; args are constructed by buildArgs() from validated opts.
+	// from Task 12; args are constructed by BuildArgs() from validated opts.
 	cmd := exec.CommandContext(ctx, opts.ExecPath, args...) //nolint:gosec
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
@@ -142,9 +142,9 @@ func ResolveExitCode(err error) int {
 	return -1
 }
 
-// buildArgs assembles the rsync argv (without the program path itself) from
+// BuildArgs assembles the rsync argv (without the program path itself) from
 // opts. Pure function; unit-testable without exec'ing anything.
-func buildArgs(opts Options) []string {
+func BuildArgs(opts Options) []string {
 	args := make([]string, 0, 12)
 	if opts.Archive {
 		args = append(args, "-a")

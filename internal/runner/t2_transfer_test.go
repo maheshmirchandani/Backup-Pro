@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maheshmirchandani/Backup-Pro/internal/rsync"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 	"github.com/maheshmirchandani/Backup-Pro/internal/selection"
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
@@ -162,6 +163,25 @@ func TestRunT2Transfer_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(cmdLine, "--progress") {
 		t.Errorf("command_line missing --progress: %q", cmdLine)
+	}
+	// Lockstep with rsync.BuildArgs: the audit command_line MUST be
+	// byte-equal to the subprocess argv reconstruction. A future change
+	// that builds the audit string from one Options snapshot and invokes
+	// rsync from a different one (or that adds a new flag to BuildArgs
+	// but not to the audit) would silently produce a misleading audit
+	// line. This assertion locks single-source-of-truth.
+	expectedOpts := rsync.Options{
+		ExecPath:   fakeRsyncPath(t, "rsync-ok.sh"),
+		SourceRoot: src,
+		DestRoot:   dest,
+		Files:      candidateRelPaths(cands),
+		Archive:    true,
+		Partial:    true,
+		Xattrs:     true,
+	}
+	wantCmdLine := rsyncCommandLine(expectedOpts)
+	if cmdLine != wantCmdLine {
+		t.Errorf("command_line lockstep with rsync.BuildArgs failed:\n got:  %q\n want: %q", cmdLine, wantCmdLine)
 	}
 	if fc, ok := tsDetails["file_count"].(float64); !ok || int(fc) != len(cands) {
 		t.Errorf("transfer_started.details.file_count = %v; want %d", tsDetails["file_count"], len(cands))
@@ -716,4 +736,3 @@ func TestRunT2Transfer_MkdirAllCreatesRunDir(t *testing.T) {
 		t.Errorf("RsyncLogPath %q not under runDir %q", res.RsyncLogPath, runDir)
 	}
 }
-

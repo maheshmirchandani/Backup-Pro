@@ -23,7 +23,7 @@ func TestBuildArgs_AllFlagsSet(t *testing.T) {
 		HardLinks:  true,
 		Delete:     true,
 	}
-	got := buildArgs(opts)
+	got := BuildArgs(opts)
 	want := []string{"-a", "--partial", "--xattrs", "--sparse", "--hard-links", "--delete", "--progress", "/src/", "/dst"}
 	if !equalSlices(got, want) {
 		t.Errorf("argv got %q want %q", got, want)
@@ -36,7 +36,7 @@ func TestBuildArgs_NoFlags(t *testing.T) {
 		SourceRoot: "/src",
 		DestRoot:   "/dst",
 	}
-	got := buildArgs(opts)
+	got := BuildArgs(opts)
 	want := []string{"--progress", "/src/", "/dst"}
 	if !equalSlices(got, want) {
 		t.Errorf("argv got %q want %q", got, want)
@@ -54,7 +54,7 @@ func TestBuildArgs_StripsTrailingSlashesFromSource(t *testing.T) {
 	}
 	for _, c := range cases {
 		opts := Options{ExecPath: "/x", SourceRoot: c.in, DestRoot: "/dst"}
-		got := buildArgs(opts)
+		got := BuildArgs(opts)
 		// Source is second-to-last; DestRoot is last.
 		if len(got) < 2 {
 			t.Fatalf("argv too short: %v", got)
@@ -74,7 +74,7 @@ func TestBuildArgs_FilesFromPresentWhenFilesNonEmpty(t *testing.T) {
 		Archive:    true,
 		Files:      []string{"a.txt", "subdir/b.md"},
 	}
-	got := buildArgs(opts)
+	got := BuildArgs(opts)
 	sawFrom0 := false
 	sawFilesFrom := false
 	for _, a := range got {
@@ -100,7 +100,7 @@ func TestBuildArgs_NoFilesFromWhenFilesEmpty(t *testing.T) {
 		DestRoot:   "/dst",
 		Archive:    true,
 	}
-	got := buildArgs(opts)
+	got := BuildArgs(opts)
 	for _, a := range got {
 		if a == "--from0" || strings.HasPrefix(a, "--files-from") {
 			t.Errorf("argv should NOT include %q when Files is empty: %q", a, got)
@@ -132,8 +132,8 @@ func TestFileListBytes_DoubleDashPrefixSurvives(t *testing.T) {
 		t.Errorf("malicious filename roundtrip lost; got %q want %q", got, want)
 	}
 
-	// Also assert that buildArgs never reproduces ANY filename from Files in argv.
-	args := buildArgs(opts)
+	// Also assert that BuildArgs never reproduces ANY filename from Files in argv.
+	args := BuildArgs(opts)
 	for _, arg := range args {
 		for _, f := range malicious {
 			if arg == f {
