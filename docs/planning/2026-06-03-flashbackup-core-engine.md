@@ -191,18 +191,39 @@ type Lock struct {
 func Acquire(ctx context.Context, lockFilePath, volumeUUID string) (*LockHandle, error)
 func (h *LockHandle) Release() error
 
-type PreflightContext struct {
-    LockHandle    *LockHandle
-    VolumeUUID    string         // captured at T0 per invariant #30; re-verified per phase
-    DestRoot      string         // resolved, symlink-free
-    Hostname      string         // for namespace prefix
-    Username      string
-    VersionFile   state.VersionFile
-    EmbeddedRsyncPath string     // verified SHA256 path to extracted rsync
+// Options configure a Preflight invocation.
+type Options struct {
+    DestRoot     string  // absolute path to USB mountpoint; required
+    SkipCodesign bool    // test-only escape hatch; release builds never set this true
 }
 
-func Preflight(ctx context.Context, opts PreflightOptions) (*PreflightContext, error)
-func (p *PreflightContext) VerifyVolumeUnchanged(ctx context.Context) error  // call at every phase boundary
+// PreflightContext is the populated output of a successful Preflight call.
+// Stored by the runner; passed to every phase. Release the lock (and any
+// future-added resources) via pc.Release() when done; typically `defer` or
+// `t.Cleanup` immediately after a successful Preflight.
+//
+// Reconciled with internal/preflight/preflight.go on 2026-06-04 after the
+// Task 20 implementation produced a richer shape than this section had
+// originally specified. The richer shape carries the per-component (dev,ino)
+// baseline and the captured-volume metadata that the runner needs at every
+// phase boundary, so updating the contract here matches what Task 22 will
+// consume.
+type PreflightContext struct {
+    LockHandle      *lock.LockHandle
+    SymlinkBaseline *symlink.Baseline       // (dev,ino) per path component at T0
+    VolumeUUID      *volume_uuid.Captured   // struct (Mountpoint + UUID), not bare string
+    Filesystem      *filesystem.Info
+    DestRoot        string                  // resolved, symlink-free, absolute
+    DotDir          string                  // <DestRoot>/.flashbackup
+    Hostname        string                  // for namespace prefix
+    Username        string
+    VersionFile     state.VersionFile       // loaded HMAC key for manifest
+    RsyncPath       string                  // SHA256-verified path to extracted rsync
+}
+
+func Preflight(ctx context.Context, opts Options) (*PreflightContext, error)
+func (pc *PreflightContext) VerifyVolumeUnchanged(ctx context.Context) error  // call at every phase boundary
+func (pc *PreflightContext) Release() error                                   // idempotent; releases lock and other resources
 
 // internal/runner (Tasks 21-29)
 
