@@ -1,0 +1,11 @@
+sending incremental file list
+Documents/foo.pdf
+        524,288 100%  500.00MB/s    0:00:00 (xfr#1, to-chk=2/3)
+Documents/bar.docx
+         32,768  20%   30.00MB/s    0:00:01
+        163,840 100%  150.00MB/s    0:00:00 (xfr#2, to-chk=1/3)
+Documents/baz.md
+            512 100%   10.00kB/s    0:00:00 (xfr#3, to-chk=0/3)
+
+sent 720,896 bytes  received 67 bytes  720,963.00 bytes/sec
+total size is 720,640  speedup is 1.00
