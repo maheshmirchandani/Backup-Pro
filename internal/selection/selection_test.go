@@ -358,7 +358,7 @@ func TestWalk_RelativePathHasForwardSlashes(t *testing.T) {
 // write time (which it does by default on every test machine + CI runner).
 // That skip means the FS-level test does not exercise the collision branch
 // in coverage; this unit test does, against the same code path the walker
-// uses. Per invariant #32 — keeping the test independent of FS behavior.
+// uses. Per invariant #32; keeping the test independent of FS behavior.
 func TestCandidateCollector_CollisionLogic(t *testing.T) {
 	t.Run("single entry accepted", func(t *testing.T) {
 		c := newCandidateCollector()
