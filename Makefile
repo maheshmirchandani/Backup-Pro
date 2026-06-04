@@ -88,17 +88,22 @@ bench-baseline:
 	fi
 
 # Per-package coverage gates: runner/state/hash/preflight >=80% statement-line per invariant #42.
-# Runs `go test -cover` per package and parses the "coverage: X% of statements" line — this is the
+# Runs `go test -cover` per package and parses the "coverage: X% of statements" line; this is the
 # real statement-weighted coverage Go reports (not a per-function average, which would inflate the
 # number on small util functions). Each safety-critical package is independently gated; packages
 # that don't exist yet are skipped (the gate kicks in per package as it lands).
+#
+# FLASHBACKUP_E2E=1 is set per-package because the runner package's Run state machine cannot be
+# meaningfully tested without exercising the full preflight + rsync pipeline (which requires
+# hdiutil + a GNU rsync). On hosts where hdiutil or GNU rsync is missing, the e2e tests skip and
+# the coverage gate may dip below 80%; install via `brew install rsync` and retry on macOS.
 coverage:
 	@failed=""; ran=""; tmpdir=$$(mktemp -d); \
 	for pkg in runner hash state preflight; do \
 		[ -d ./internal/$$pkg ] || continue; \
 		ran="$$ran $$pkg"; \
 		profile=$$tmpdir/$$pkg.cover; \
-		go test -timeout=2m -cover -coverpkg=./internal/$$pkg/... -coverprofile=$$profile ./internal/$$pkg/... >/dev/null 2>&1 || true; \
+		FLASHBACKUP_E2E=1 go test -timeout=5m -cover -coverpkg=./internal/$$pkg/... -coverprofile=$$profile ./internal/$$pkg/... >/dev/null 2>&1 || true; \
 		if [ ! -s "$$profile" ] || [ $$(wc -l < "$$profile") -le 1 ]; then \
 			printf "%-12s -- (no statements; vacuously covered)\n" "$$pkg"; \
 			continue; \

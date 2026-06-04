@@ -268,6 +268,7 @@ func RunT4DeleteSource(ctx context.Context, in T4Input) (*T4Result, error) {
 		DeletionLogPath:        delLogPath,
 	}
 
+	filesDone := 0
 	for _, c := range in.Candidates {
 		// Mid-loop cancellation check. Per-file work is short-running once
 		// started (Lstat + Remove); we do not preempt mid-syscall.
@@ -284,7 +285,39 @@ func RunT4DeleteSource(ctx context.Context, in T4Input) (*T4Result, error) {
 			continue
 		}
 
+		// Fault injection: PointT3PreUnlink. Per-file hook BEFORE the
+		// unlink attempt; used by mutation tests to drift the source
+		// between T2 classification and T3 unlink (phase "T3-pre" matches
+		// --inject:mutate-source:phase=T3-pre specs per the master plan).
+		if hookErr := Hook(ctx, PointT3PreUnlink, HookArgs{
+			Phase:       "T3-pre",
+			CurrentFile: c.RelativePath,
+			FilesDone:   filesDone,
+			FilesTotal:  in.T3Result.FilesVerified,
+			SourceRoot:  in.SourceRoot,
+		}); hookErr != nil {
+			wrapped := fmt.Errorf("runner T3: pre-unlink fault on %q: %w", c.RelativePath, hookErr)
+			runT4Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+			return nil, wrapped
+		}
+
 		status, attemptErr := t4AttemptDelete(c, in.Signatures)
+
+		// Fault injection: PointT3PerFile. Per-file hook AFTER the unlink
+		// decision but BEFORE the audit + deletion-log writes. Used by
+		// tests that need to inject permission errors at the audit boundary.
+		if hookErr := Hook(ctx, PointT3PerFile, HookArgs{
+			Phase:       string(types.PhaseDelete),
+			CurrentFile: c.RelativePath,
+			FilesDone:   filesDone,
+			FilesTotal:  in.T3Result.FilesVerified,
+			SourceRoot:  in.SourceRoot,
+		}); hookErr != nil {
+			wrapped := fmt.Errorf("runner T3: per-file fault on %q: %w", c.RelativePath, hookErr)
+			runT4Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+			return nil, wrapped
+		}
+		filesDone++
 
 		// Update aggregate counters.
 		result.PerFileOutcome[c.RelativePath] = status

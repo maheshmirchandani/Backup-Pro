@@ -192,6 +192,7 @@ func RunT3HashCompare(ctx context.Context, in T3Input) (*T3Result, error) {
 		PerFileStatus: make(map[string]state.FileStatus, len(in.Candidates)),
 	}
 
+	filesDone := 0
 	for _, c := range in.Candidates {
 		// Cancellation check between files. The per-file classify routine
 		// is short-running; we do not preempt mid-hash here (the
@@ -202,7 +203,42 @@ func RunT3HashCompare(ctx context.Context, in T3Input) (*T3Result, error) {
 			return nil, wrapped
 		}
 
+		// Fault injection: PointT2PreHash. Per-file (so file= selector
+		// works) hook BEFORE the classify routine reads the source. Used
+		// by mutation tests to mutate the source between T0+ enumeration
+		// and T2 hashing. Phase wire string is "T2-pre" to match
+		// --inject:mutate-source:phase=T2-pre specs per the master plan.
+		if hookErr := Hook(ctx, PointT2PreHash, HookArgs{
+			Phase:       "T2-pre",
+			CurrentFile: c.RelativePath,
+			FilesDone:   filesDone,
+			FilesTotal:  len(in.Candidates),
+			SourceRoot:  in.SourceRoot,
+			DestRoot:    in.DestRoot,
+		}); hookErr != nil {
+			wrapped := fmt.Errorf("runner T2: pre-hash fault on %q: %w", c.RelativePath, hookErr)
+			runT3Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+			return nil, wrapped
+		}
+
 		status, srcDigest, dstDigest, classifyErr := t3ClassifyFile(ctx, c, in.Signatures, in.DestRoot)
+
+		// Fault injection: PointT2PerFile. Per-file hook AFTER classify
+		// but BEFORE the audit + manifest writes. Used by tests that need
+		// to simulate a fault discovered while classifying a specific file.
+		if hookErr := Hook(ctx, PointT2PerFile, HookArgs{
+			Phase:       string(types.PhaseHashCompare),
+			CurrentFile: c.RelativePath,
+			FilesDone:   filesDone,
+			FilesTotal:  len(in.Candidates),
+			SourceRoot:  in.SourceRoot,
+			DestRoot:    in.DestRoot,
+		}); hookErr != nil {
+			wrapped := fmt.Errorf("runner T2: per-file fault on %q: %w", c.RelativePath, hookErr)
+			runT3Abort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+			return nil, wrapped
+		}
+		filesDone++
 
 		// Emit the per-file audit event. The Kind depends on the status.
 		if appendErr := t3EmitFileAudit(ctx, in.EventStore, phaseWire, c.RelativePath,

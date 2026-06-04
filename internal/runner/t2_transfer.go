@@ -262,10 +262,42 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 			0, 0, rsyncLogPath)
 	}
 
+	// Fault injection: PointT1PreRsync. Test-only hook for fault-injection
+	// e2e tests (Tasks 48-51b); no-op in release builds via the !faultinject
+	// stub. Wire phase string is "T1" to match --inject:phase=T1 specs.
+	// On non-nil return: treat as fatal phase error.
+	var bytesTotal int64
+	for _, c := range in.Candidates {
+		bytesTotal += c.Size
+	}
+	if hookErr := Hook(ctx, PointT1PreRsync, HookArgs{
+		Phase:      string(types.PhaseTransfer),
+		FilesTotal: len(in.Candidates),
+		BytesTotal: bytesTotal,
+		DestRoot:   in.DestRoot,
+		SourceRoot: in.SourceRoot,
+	}); hookErr != nil {
+		wrapped := fmt.Errorf("runner T1: pre-rsync fault: %w", hookErr)
+		runT2EmitAbort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		return nil, wrapped
+	}
+
 	// 6. Wire the progress parser. PassThrough writes raw rsync stdout
 	// bytes to rsync.log; OnEvent classifies into UIEvents + counters.
-	var filesAttempted int
-	var bytesTransferred int64
+	//
+	// Fault injection: PointT1Progress fires from inside the per-progress-
+	// line callback so AfterPct / AfterCount one-shots can trigger mid-
+	// transfer. When Hook returns non-nil the callback cancels the rsync
+	// child context (rsyncCtx) which kills the subprocess; rsync.Run then
+	// returns the cancellation error, which we wrap as the fatal-phase
+	// error after Run returns. We capture the hook error in hookFireErr.
+	rsyncCtx, rsyncCancel := context.WithCancel(ctx)
+	defer rsyncCancel()
+	var (
+		filesAttempted   int
+		bytesTransferred int64
+		hookFireErr      error
+	)
 	parser := &rsync.Parser{
 		PassThrough: rsyncLogFile,
 		OnEvent: func(ev rsync.ProgressEvent) {
@@ -286,6 +318,21 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 				if ev.BytesTransferred > bytesTransferred {
 					bytesTransferred = ev.BytesTransferred
 				}
+				if hookFireErr == nil {
+					if hErr := Hook(rsyncCtx, PointT1Progress, HookArgs{
+						Phase:       string(types.PhaseTransfer),
+						CurrentFile: ev.Path,
+						FilesDone:   filesAttempted,
+						FilesTotal:  len(in.Candidates),
+						BytesDone:   bytesTransferred,
+						BytesTotal:  bytesTotal,
+						DestRoot:    in.DestRoot,
+						SourceRoot:  in.SourceRoot,
+					}); hErr != nil {
+						hookFireErr = hErr
+						rsyncCancel()
+					}
+				}
 			case rsync.ProgressFileCompleted:
 				filesAttempted++
 				if ev.BytesTransferred > bytesTransferred {
@@ -300,9 +347,17 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 	opts.Stdout = parser
 	opts.Stderr = rsyncLogFile // rsync stderr is human diagnostics; goes straight to the log
 
-	// 7. Invoke rsync.
+	// 7. Invoke rsync. Use rsyncCtx so the Progress fault-injection hook
+	// can cancel the subprocess mid-flight; the parent ctx still governs
+	// shutdown for non-fault cancellations.
 	w := &rsync.Wrapper{}
-	runErr := w.Run(ctx, opts)
+	runErr := w.Run(rsyncCtx, opts)
+
+	// If the Progress hook fired, prefer its error over rsync's wrapped
+	// cancellation (which is just the symptom of the cancel call).
+	if hookFireErr != nil {
+		runErr = fmt.Errorf("runner T1: progress fault: %w", hookFireErr)
+	}
 
 	// 8. Drain any tail line the parser buffered without a terminator.
 	parser.Flush()
@@ -342,6 +397,28 @@ func RunT2Transfer(ctx context.Context, in T2Input) (*T2Result, error) {
 
 		return &T2Result{
 			ExitCode:         exitCode,
+			FilesAttempted:   filesAttempted,
+			BytesTransferred: bytesTransferred,
+			RsyncLogPath:     rsyncLogPath,
+		}, wrapped
+	}
+
+	// Fault injection: PointT1Post. Fires AFTER rsync returns 0 so a fault
+	// can simulate a post-transfer disaster (e.g., a stale lock, a unmount
+	// race). On non-nil return: treat as fatal phase error.
+	if hookErr := Hook(ctx, PointT1Post, HookArgs{
+		Phase:      string(types.PhaseTransfer),
+		FilesDone:  filesAttempted,
+		FilesTotal: len(in.Candidates),
+		BytesDone:  bytesTransferred,
+		BytesTotal: bytesTotal,
+		DestRoot:   in.DestRoot,
+		SourceRoot: in.SourceRoot,
+	}); hookErr != nil {
+		wrapped := fmt.Errorf("runner T1: post-rsync fault: %w", hookErr)
+		runT2EmitAbort(ctx, in.EventStore, in.UIRenderer, phaseWire, startedAt, wrapped)
+		return &T2Result{
+			ExitCode:         0,
 			FilesAttempted:   filesAttempted,
 			BytesTransferred: bytesTransferred,
 			RsyncLogPath:     rsyncLogPath,
