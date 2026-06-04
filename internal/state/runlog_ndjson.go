@@ -176,10 +176,16 @@ func ReadRunLog(path string) ([]RunLogEntry, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		var scanErr error
 		if errors.Is(err, bufio.ErrTooLong) {
-			return entries, fmt.Errorf("scan runs.ndjson: line exceeds %d bytes: %w", maxRunLogLineBytes, err)
+			scanErr = fmt.Errorf("scan runs.ndjson: line exceeds %d bytes: %w", maxRunLogLineBytes, err)
+		} else {
+			scanErr = fmt.Errorf("scan runs.ndjson: %w", err)
 		}
-		return entries, fmt.Errorf("scan runs.ndjson: %w", err)
+		// Preserve any accumulated parse errors alongside the scanner error
+		// (a scan failure later in the file should not silently drop earlier
+		// per-line parse errors).
+		return entries, errors.Join(append(errs, scanErr)...)
 	}
 	if len(errs) > 0 {
 		return entries, errors.Join(errs...)
