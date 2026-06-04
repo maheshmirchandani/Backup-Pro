@@ -86,6 +86,10 @@ func (s *Store) save(doc *ProfilesDoc) error {
 
 // writeAtomic mirrors state.WriteTmpThenRename. Kept local to avoid
 // importing internal/state into a leaf package.
+//
+// TODO(plan2): consolidate this duplicate with state.WriteTmpThenRename
+// by moving the helper into a new internal/atomic (or internal/fsutil)
+// leaf package that both internal/state and internal/profiles can import.
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)

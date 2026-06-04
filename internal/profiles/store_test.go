@@ -133,13 +133,14 @@ func TestStore_DeleteNonexistent(t *testing.T) {
 }
 
 // Table-driven pattern rejection covers the 8 attack/syntax vectors from
-// the multi-hat security review.
+// the multi-hat security review. Last case puts a bad pattern in Excludes
+// (rather than Includes) so we cover both validation paths symmetrically.
 func TestStore_RejectsBadPatterns(t *testing.T) {
 	cases := []struct {
-		name        string
-		pattern     string
-		wantSubstr  string
-		fieldExclud bool // place pattern in Excludes vs Includes
+		name       string
+		pattern    string
+		wantSubstr string
+		inExcludes bool // place pattern in Excludes vs Includes
 	}{
 		{"Bracket", "foo[", "disallowed characters", false},
 		{"Traversal", "../../*", "must not contain ..", false},
@@ -149,13 +150,14 @@ func TestStore_RejectsBadPatterns(t *testing.T) {
 		{"Long", strings.Repeat("a", 300), "exceeds 256 chars", false},
 		{"DisallowedChars", "foo!bar", "disallowed characters", false},
 		{"Empty", "", "empty pattern", false},
+		{"BadInExcludes", "**/*.tmp", "must not contain **", true},
 	}
 	for _, tc := range cases {
 		tc := tc
-		t.Run("TestStore_Rejects"+tc.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			s, _ := newTestStore(t)
 			p := Profile{Name: "x", Source: "/x"}
-			if tc.fieldExclud {
+			if tc.inExcludes {
 				p.Excludes = []string{tc.pattern}
 			} else {
 				p.Includes = []string{tc.pattern}
