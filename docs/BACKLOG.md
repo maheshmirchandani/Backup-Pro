@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night session, after Tasks 29-30 + their review fixes)
+## Project status (2026-06-04 night session, after Task 31)
 
-**Phase:** Plan 1 execution. Tasks 1-30 complete. CI green at `06a4255`. RUNNER PACKAGE COMPLETE; verify-side started with `internal/verify/load`. Next: Task 31 (`internal/verify/rehash`) + Task 30 review in overlap.
+**Phase:** Plan 1 execution. Tasks 1-31 complete. RUNNER PACKAGE COMPLETE; verify pipeline now has load + rehash. Next: Task 32 (`internal/verify/verify.go` top-level) + Task 31 review in overlap.
 
 **Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
 
@@ -84,6 +84,24 @@ Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock 
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-04 (later night): Task 31 (verify/rehash)
+
+Task 31 (`internal/verify/rehash`) implements the per-file rehash + classify stage of the verify pipeline. Consumes `LoadResult.Entries` from Task 30; re-hashes each destination file under the namespaced path `<DestRoot>/<paths.Prefix(host, user)>/<RelPath>`; classifies into one of five Status values (`verified` / `size_mismatch` / `hash_mismatch` / `missing` / `unreadable`). Per-file errors do NOT abort the loop. Aggregates counters into a Result that Task 32 will fold into VerifyResult.
+
+Design decisions worth recording:
+- **Size-check-before-hash:** the spec's cheap-fail-fast rule (a 10GB file truncated to 100 bytes should not waste a hash pass) is enforced by `os.Lstat → compare to manifest size → short-circuit on mismatch BEFORE Open + StreamSHA256`. `bytesReadForStatus` returns 0 for size-mismatched files so `BytesRead` truthfully reflects what was streamed.
+- **Status is a separate type from `state.FileStatus`:** verify-side has `missing` and `unreadable` (combining permission + IO error) that don't exist on the backup side; conversely it lacks `source_mutated` and `not_transferred`. A separate `Status` keeps each side's vocabulary honest. The underlying error is preserved on `FileResult.Err` so a caller wanting to subdivide unreadable can do so without re-running.
+- **Phase wire string is `"verify"`:** the runner-side phase taxonomy (T0..T4) describes the backup state machine; verify is a separate flow. Introduced `const phaseWire = "verify"` (file-local, not exported through `types.Phase`) so the renderer's phase-filter logic gets an unambiguous tag without forcing the runner Phase set to absorb a non-backup concept. Persisting "verify" to events.ndjson is a Task 32 decision.
+- **Namespace via `paths.Namespaced`:** does NOT pre-namespace `DestRoot`; the rehash package owns the namespace join via the same helper the runner uses (single source of truth restored after the Task 29 review fix #2 caught the duplicated logic bug in runner.go).
+- **`lstat` not `stat`:** matches `t3_hash_compare.go`'s choice; a destination that has been replaced by a symlink is a corruption signal, not a "follow the symlink and hash whatever it points to" instruction.
+- **Progress event: one per file (no throttling):** the spec's 200 ms tick target applies to T1 rsync transfer where rsync emits thousands of byte-level updates per second; verify is hash-bound and a per-file granularity gives the renderer one update per multi-second hash, well below the throttle threshold.
+- **Cancellation contract:** entry-time cancel returns `(nil, wrapped err)` matching `load.Load`; mid-loop cancel returns `(partial Result, wrapped err)` so the caller does not lose work already done. Test `TestRehash_CancelledMidStream` uses a `cancelAfterFirstRenderer` to construct a real mid-loop cancellation that exercises the partial-result path; `TestRehash_CancelledAtEntry` covers the nil-result entry path.
+- **`BytesTotal` pre-computed:** one O(n) sweep up-front so the renderer holds a stable progress denominator. Alternative (incrementally growing denominator) would force the renderer to redraw a moving max.
+
+13 tests covering: happy path, size mismatch with hash-NOT-computed assertion, hash mismatch, missing, unreadable (with POSIX skip + root skip), aggregate counters covering all 5 outcomes, empty entries, progress events with phase=verify + monotonic counters + final-event = run-result assertion, mid-loop cancellation, namespace respect (including decoy file at unnamespaced path that must NOT satisfy verify; and wrong-host run returns Missing not Verified), nil renderer (counters identical to recorder run), empty DestRoot rejection, entry-time cancellation, renderer-errors-swallowed (PS3), PerFile order preservation. Package coverage 95.9% (above 85% sub-target).
+
+All five pre-commit gates pass: `go vet ./...` clean; `gofmt -s -l .` empty; `go test -race -count=1 ./...` all pass (17 packages green); `make coverage` ok (runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%); `go build -tags faultinject ./internal/...` clean.
 
 ### 2026-06-04 (later night): Task 30 (verify/load) + Task 29 review fixes
 
