@@ -2,7 +2,20 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 53 + 54: ONE TASK LEFT)
+## Project status (2026-06-05): PLAN 1 COMPLETE; tagged v0.1.0-core
+
+**Phase:** Plan 1 DONE. Tasks 1-55 shipped; v0.1.0-core tag created at commit `b39a11c` (tag object SHA `466dc65`) and pushed to origin. Repo public. CI green. Runner + verify + plain renderer + cmd/flashbackup (init/backup/verify/status/profiles/help) + 12 e2e tests + ERROR_CATALOG + README + DOGFOOD all done. Move-mode atomic gate working end-to-end. faultinject DSL + release stub clean of symbols.
+
+**Queued for Plan 2 (out of v0.1.0-core scope):**
+- 22a: unowned T0 event Kinds wiring (lock_acquired, lock_stale_detected, lock_contention, filesystem_refused, volume_uuid_changed).
+- 29a: PreflightContext test injection for TestRun_VolumeUUIDChangedMidRun.
+- 50a: preflight orphan-recovery gate (synthesize crashed_resumed finished line for started-without-finished orphans).
+- 50b: AC-13b rsync --partial resume e2e with >tiny fixture.
+- 51c: --delete CLI flag + mirror-delete-DEST runner phase + FB-paths reconstruction.
+- PA-1, PA-2: minor plan amendments from Task 53 review (delete_failed.errno optional; file_enumerated path Details placement).
+- Plan 2 itself: TUI (Bubble Tea), signed + notarized release pipeline, full friend-facing docs.
+
+## Older project status (2026-06-05, after Tasks 53 + 54: ONE TASK LEFT)
 
 **Phase:** Plan 1 execution near end. Tasks 1-54 complete (56/58). Repo public. CI green. e2e + ERROR_CATALOG + README done. **Final task: 55 (v0.1.0-core tag completes Plan 1).**
 
