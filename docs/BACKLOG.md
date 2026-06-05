@@ -2,7 +2,36 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05): PLAN 1 COMPLETE; v0.1.0-core tagged at `b39a11c`; CI green at `27558c9`
+## Project status (2026-06-05 evening): Phase 0 dogfood session 1 surfaced Task 12a as the blocker
+
+**Phase:** Plan 1.5 prep. Phase 0 dogfood session 1 (1920 to 2030 local) ran on MM's M1 Max + ROCKET-2TB USB. **First real backup revealed the embedded rsync is the Task 12a placeholder stub:** the binary at `internal/rsync/bin/rsync.placeholder` prints "PLACEHOLDER rsync; awaiting Task 12a build" and exits 0. Engine reports T1 OK because rsync exit-code-only check passes; T2 hash-compare tags all files `not_transferred`; final exit `partial`. **No data loss** (copy mode; would have been blocked by atomic gate in move mode anyway). CI never caught this because every e2e test sets `FLASHBACKUP_RSYNC_PATH_FOR_TEST=/opt/homebrew/bin/rsync`; the placeholder code path is not exercised end-to-end.
+
+**Plain statement (per global "outcome over architecture"):** v0.1.0-core ships a binary that cannot back up data on a clean install. Engine-correct, build-incomplete. Phase 0 gate cannot honestly close without Task 12a.
+
+**Session 1 results (commit `54a1bb0`, dogfood log `docs/dogfood/2026-06-05-1920-phase-0-log.md`):**
+- Backup #1 (placeholder rsync): 3 s, 0 bytes, exit `partial`. Surfaced the blocker.
+- Backup #2 (env override): 6.6 s, 1.4 GB, 210/210 files, exit `ok`. First real working backup; MM's important docs are now backed up.
+- Verify #1 (env override): 0.9 s, 210 files, 1.42 GB SHA256 rehashed, exit `ok`.
+- Status: clean. Nit: free-space reports 0 B on APFS (likely `statfs.f_bfree` vs `f_bavail`).
+
+**Other nits logged:**
+- Verify renderer summary `details:` falls back to generic path instead of specific `summary.json`.
+- Verify `summary.json` `duration_seconds` integer-truncates sub-second runs to 0.
+- Test-pyramid gap: no e2e exercises the placeholder end-to-end; Task 12b candidate.
+
+**Hybrid path agreed with MM:** dogfood continues only as engine validation via env override; real gate close requires Task 12a. **Next session: Task 12a brainstorm + spec + plan + implement.**
+
+**Task 12a scope (next session):**
+- Build GNU rsync 3.4.1 universal2 (arm64 + x86_64) from upstream source on macOS.
+- `scripts/build-rsync.sh` is currently a stub; needs to: download release tarball, verify upstream signature, configure twice (arch-specific), make twice, `lipo -create`, verify with `file`, SHA256.
+- Embedded SHA256 constant location: TBD (check `internal/rsync/`).
+- Replace placeholder with the real binary at build time (or keep placeholder for dev builds and use a build tag for release).
+- Apple notarization is Plan 2, not Task 12a.
+- Companion Task 12b: e2e test that runs without the env override and either asserts the placeholder rejection path or (once 12a lands) the real-bytes-transferred path.
+
+**Out of scope until Task 12a lands:** Plan 2 brainstorm; 50a + 51c + 22a + 29a + 50b + PA-1 + PA-2; retag of v0.1.0-core. v0.1.0-core tag stays as historical record of engine completeness.
+
+## Older project status (2026-06-05): PLAN 1 COMPLETE; v0.1.0-core tagged at `b39a11c`; CI green at `27558c9`
 
 **Phase:** Plan 1 DONE. Tasks 1-55 shipped; v0.1.0-core tag at commit `b39a11c` (tag object SHA `466dc65`), pushed to origin. Repo public. CI green at HEAD `27558c9` (post-tag gosec G204 nolint commit; test-file lint comments only; binary at `b39a11c` is functionally identical to `27558c9` since nolint comments don't affect compiled output).
 
