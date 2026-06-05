@@ -1,16 +1,100 @@
 name: CI
 
+# macOS minutes are billed at 10x vs Linux on private repos (~200 effective
+# macOS-min/month free vs ~2000 on Linux). Split rationale (2026-06-04 quota
+# rescue):
+#   * test-linux  runs on ubuntu-latest and covers the portable packages
+#     (lint + go vet across the whole tree, plus race-tests for packages
+#     that don't depend on macOS syscalls or external macOS binaries).
+#   * test       stays on macos-14 but its `go test` target is narrowed to
+#     the macOS-only packages (preflight subtree, drives, runner -- which
+#     transitively imports preflight). Lint + coverage + faultinject + the
+#     release symbol-scan stay here too so macOS verifies the build artifact.
+#   * e2e-fast / e2e-safety stay on macos-14 (hdiutil + APFS mounts).
+#   * bench moves to ubuntu (benchmarks are pure-Go hash throughput, no
+#     macOS-specific paths exercised at bench time today).
+#
+# Docs-only commits skip CI entirely via the paths-ignore filter; saves a
+# full macOS-job set per BACKLOG/memory housekeeping push.
+
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
 
 permissions:
   contents: read
 
 jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Install golangci-lint
+        run: |
+          VERSION=$(cat scripts/golangci-version.txt)
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v$VERSION
+      - name: Vet (whole tree; catches cross-platform build errors)
+        run: go vet ./...
+      - name: Vet (faultinject build)
+        run: go vet -tags faultinject ./...
+      - name: gofmt -s -l (formatting drift)
+        run: |
+          DRIFT=$(gofmt -s -l .)
+          if [ -n "$DRIFT" ]; then
+            echo "gofmt -s drift in: $DRIFT"
+            exit 1
+          fi
+      - name: Lint (golangci-lint; runs against the macOS GOOS to validate
+              macOS-only files too)
+        run: GOOS=darwin make lint
+      - name: Test (portable packages, race-enabled)
+        run: |
+          go test -race -count=1 \
+            ./internal/hash/... \
+            ./internal/state/... \
+            ./internal/profiles/... \
+            ./internal/paths/... \
+            ./internal/selection/... \
+            ./internal/runner/types/... \
+            ./internal/verify/...
+      - name: Test (faultinject tag; portable packages)
+        run: |
+          go test -race -count=1 -tags faultinject \
+            ./internal/hash/... \
+            ./internal/state/... \
+            ./internal/profiles/... \
+            ./internal/paths/... \
+            ./internal/selection/... \
+            ./internal/runner/types/... \
+            ./internal/verify/...
+
   test:
     runs-on: macos-14
+    # macOS-only packages: preflight subtree, drives, runner (transitively
+    # depends on preflight). lint + faultinject + coverage + release symbol
+    # scan all stay here so the build artifact is gated by macOS-side tooling.
+    # The portable packages are exercised by test-linux; this job does not
+    # re-run them to save macOS minutes.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -28,17 +112,27 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v$VERSION
       - name: Lint
         run: make lint
-      - name: Test (unit + integration)
-        run: make test
-      - name: Test (faultinject)
-        run: make test-faultinject
-      - name: Coverage gate
+      - name: Test (macOS-only packages, race-enabled)
+        run: |
+          go test -race -count=1 \
+            ./internal/drives/... \
+            ./internal/preflight/... \
+            ./internal/rsync/... \
+            ./internal/runner/...
+      - name: Test (faultinject; macOS-only packages)
+        run: |
+          go test -race -count=1 -tags faultinject \
+            ./internal/drives/... \
+            ./internal/preflight/... \
+            ./internal/rsync/... \
+            ./internal/runner/...
+      - name: Coverage gate (full tree; gates ≥80% per package)
         run: make coverage
       - name: Release symbol-scan
         run: make verify-release
 
   e2e-fast:
-    needs: test
+    needs: [test, test-linux]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +149,7 @@ jobs:
         run: make e2e-fast
 
   e2e-safety:
-    needs: test
+    needs: [test, test-linux]
     runs-on: macos-14
     # PS2: e2e-safety is flaky-tolerant on PR; only blocks main push
     continue-on-error: ${{ github.event_name == 'pull_request' }}
@@ -74,8 +168,12 @@ jobs:
         run: make e2e-safety
 
   bench:
+    # Bench is hash-throughput dominated; the SHA256 + sync.Pool path under
+    # test is identical on Linux and macOS. Move to ubuntu to save the 10x
+    # macOS multiplier; if a future bench depends on macOS specifics, move
+    # that single bench file back to the macos-14 test job.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
