@@ -66,20 +66,22 @@ func main() {
 	ctx, cancel := installSignalHandlers(context.Background(), os.Stderr)
 	defer cancel()
 
-	code := run(ctx, os.Args, os.Stdout, os.Stderr)
+	code := run(ctx, os.Args, os.Stdin, os.Stdout, os.Stderr)
 	os.Exit(code)
 }
 
 // run is the testable entry point. It returns the process exit code. argv
 // matches os.Args (argv[0] is the program name, argv[1:] are arguments).
-// stdout receives --version / --help and any subcommand happy-path output;
-// stderr receives usage errors and the not-implemented stubs.
+// stdin is the source of interactive input (today: the move-mode `DELETE`
+// confirmation line in `flashbackup backup --move`); stdout receives
+// --version / --help and any subcommand happy-path output; stderr receives
+// usage errors and the not-implemented stubs.
 //
 // ctx is the signal-aware context from installSignalHandlers (in real main)
 // or context.Background (in tests). Subcommand stubs do not consult ctx
 // today; future task implementations will accept ctx as their first
 // argument.
-func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(argv) < 2 {
 		printUsage(stderr)
 		return 2
@@ -106,11 +108,11 @@ func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
 			// positional path + flags.
 			return runInit(ctx, argv[2:], stdout, stderr)
 		case "backup":
-			// Task 36: real implementation. argv[2:] is <profile-name>
-			// <USB-path> [--move]. runner.Run owns the rest. Task 37
-			// will replace the in-handler --move refusal with a real
-			// DELETE confirmation prompt.
-			return runBackup(ctx, argv[2:], stdout, stderr)
+			// Task 36 + Task 37: real implementation. argv[2:] is
+			// <profile-name> <USB-path> [--move]. With --move, runBackup
+			// reads a single line from stdin and requires an exact
+			// "DELETE" match before invoking runner.Run with ModeMove.
+			return runBackup(ctx, argv[2:], stdout, stderr, stdin)
 		default:
 			return dispatchStub(ctx, sc.name, sc.task, stderr)
 		}

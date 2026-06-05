@@ -93,25 +93,27 @@ func TestBackup_UnknownFlag(t *testing.T) {
 	}
 }
 
-// TestBackup_MoveModeRefused: --move is a deliberate refusal gate in v0.1
-// (Task 37 wires the DELETE confirmation modal). Must exit 2 with a Task-37
-// pointer in stderr so a scripted probe gets an actionable signal rather
-// than running a move with no confirmation. Replace this assertion when
-// Task 37 lands.
-func TestBackup_MoveModeRefused(t *testing.T) {
-	// --move must precede positionals; Go's flag.Parse stops at the first
-	// positional arg. Operators who type it at the end will see the
-	// "unexpected extra arguments" message instead (covered by the
-	// ArgvParsing table); both are exit-2 outcomes.
-	code, _, stderr := runCapture(t, []string{"flashbackup", "backup", "--move", "p", "/Volumes/A"})
+// TestBackup_MoveModeBadMountpoint: --move with a USB path that does not
+// resolve must fail at the mountpoint gate (exit 2) BEFORE the DELETE
+// prompt is shown. Order matters: prompting for a destructive confirmation
+// against a path that does not exist would be operator-hostile. The
+// confirmation is a Task 37 gate (AC-7/AC-8); the mountpoint check is a
+// Task 36 gate. This test pins that the Task 36 gate fires first.
+func TestBackup_MoveModeBadMountpoint(t *testing.T) {
+	bogus := filepath.Join(t.TempDir(), "no-such-mountpoint")
+	code, stdout, stderr := runCaptureStdin(t,
+		[]string{"flashbackup", "backup", "--move", "p", bogus},
+		"DELETE\n", // even with a valid token, the mountpoint check refuses first
+	)
 	if code != backupExitCodeUsage {
 		t.Errorf("exit code: got %d, want %d", code, backupExitCodeUsage)
 	}
-	if !strings.Contains(stderr, "move mode not yet supported") {
-		t.Errorf("stderr should explain move mode is unsupported, got %q", stderr)
+	if !strings.Contains(stderr, "no-such-mountpoint") {
+		t.Errorf("stderr should name the bad path, got %q", stderr)
 	}
-	if !strings.Contains(stderr, "Task 37") {
-		t.Errorf("stderr should reference Task 37, got %q", stderr)
+	// The DELETE prompt must NOT have been printed; stdout should be empty.
+	if stdout != "" {
+		t.Errorf("stdout should be empty (prompt fires AFTER mountpoint gate), got %q", stdout)
 	}
 }
 
@@ -329,6 +331,180 @@ func seedBackupSourceTree(t *testing.T, src string) []string {
 		rels = append(rels, rel)
 	}
 	return rels
+}
+
+// TestBackup_MoveMode_DeclinedWithEmptyStdin: --move with no DELETE input
+// piped in must fail at the prompt with io.ErrUnexpectedEOF; cmd maps
+// that to exit 1 (runtime). Distinct from declined-via-wrong-token (exit
+// 2): EOF means "scripted invocation forgot to pipe a confirmation",
+// which is a runtime failure of the script, not an operator typo.
+//
+// This is an E2E test because it needs a real initialized USB volume so
+// the mountpoint check passes and the runBackup flow reaches the prompt.
+func TestBackup_MoveMode_DeclinedWithEmptyStdin(t *testing.T) {
+	requireMacOS(t)
+	requireE2E(t)
+
+	dest := mountTempVolumeFS(t, "APFS")
+	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
+		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
+	}
+	defer clearImmutableRsync(dest)
+
+	src := t.TempDir()
+	seedBackupSourceTree(t, src)
+	seedProfile(t, dest, "movetest", src)
+
+	// Empty stdin: scanner hits EOF before any line; promptDeleteConfirm
+	// returns io.ErrUnexpectedEOF; cmd translates that to exit 1.
+	code, stdout, stderr := runCaptureStdin(t,
+		[]string{"flashbackup", "backup", "--move", "movetest", dest},
+		"",
+	)
+	if code != backupExitCodeRuntime {
+		t.Errorf("exit code: got %d, want %d (runtime; EOF on stdin)\nstdout=%s\nstderr=%s",
+			code, backupExitCodeRuntime, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "move confirmation failed") {
+		t.Errorf("stderr should mention move confirmation failure, got %q", stderr)
+	}
+	// The runner must NOT have been invoked: no runs.ndjson lines yet.
+	runsPath := filepath.Join(dest, ".flashbackup", "runs.ndjson")
+	if info, err := os.Stat(runsPath); err == nil && info.Size() > 0 {
+		t.Errorf("runs.ndjson should be empty/absent (runner not invoked), but has size %d", info.Size())
+	}
+}
+
+// TestBackup_MoveMode_DeclinedWithWrongToken: --move with stdin="delete\n"
+// must exit 2 (operator-fixable; just re-type). Asserts the runner is
+// NOT invoked (no runs.ndjson entries) so the source tree is untouched.
+func TestBackup_MoveMode_DeclinedWithWrongToken(t *testing.T) {
+	requireMacOS(t)
+	requireE2E(t)
+
+	dest := mountTempVolumeFS(t, "APFS")
+	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
+		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
+	}
+	defer clearImmutableRsync(dest)
+
+	src := t.TempDir()
+	rels := seedBackupSourceTree(t, src)
+	seedProfile(t, dest, "movetest", src)
+
+	code, _, stderr := runCaptureStdin(t,
+		[]string{"flashbackup", "backup", "--move", "movetest", dest},
+		"delete\n", // lowercase: declined
+	)
+	if code != backupExitCodeUsage {
+		t.Errorf("exit code: got %d, want %d (usage; declined)\nstderr=%s",
+			code, backupExitCodeUsage, stderr)
+	}
+	if !strings.Contains(stderr, "aborted by operator") {
+		t.Errorf("stderr should mention operator abort, got %q", stderr)
+	}
+
+	// Source files must remain on disk (runner not invoked; nothing
+	// could have unlinked them).
+	for _, rel := range rels {
+		srcFile := filepath.Join(src, filepath.FromSlash(rel))
+		if _, err := os.Stat(srcFile); err != nil {
+			t.Errorf("source file %q should still exist after decline: %v", srcFile, err)
+		}
+	}
+
+	// runs.ndjson should also be empty/absent: the runner never ran.
+	runsPath := filepath.Join(dest, ".flashbackup", "runs.ndjson")
+	if info, err := os.Stat(runsPath); err == nil && info.Size() > 0 {
+		t.Errorf("runs.ndjson should be empty/absent after decline, but has size %d", info.Size())
+	}
+}
+
+// TestBackup_MoveMode_AcceptedInvokesRunner: --move with stdin="DELETE\n"
+// must pass the cmd-level gate and invoke runner.Run with ModeMove. The
+// runner's own move-mode behaviour (atomic-gate, deletion-log, etc.) is
+// owned by the runner package tests; here we only assert that the gate
+// opened: runs.ndjson has 2 lines (started + finished) and the Mode in
+// the runner-side options was ModeMove (validated indirectly via the
+// deletion-log presence in the per-run dir when real rsync is wired).
+//
+// With placeholder rsync: T2 classifies all files as failed, T3 (delete)
+// is skipped by the atomic gate, exit_status=copy_only_aborted_delete
+// (exit 1). With real rsync: T1 copies, T2 verifies, T3 unlinks, exit 0.
+// Both branches confirm runner.Run was invoked with ModeMove.
+func TestBackup_MoveMode_AcceptedInvokesRunner(t *testing.T) {
+	requireMacOS(t)
+	requireE2E(t)
+
+	dest := mountTempVolumeFS(t, "APFS")
+	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
+		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
+	}
+	defer clearImmutableRsync(dest)
+
+	src := t.TempDir()
+	rels := seedBackupSourceTree(t, src)
+	seedProfile(t, dest, "movetest", src)
+
+	gnuRsync := systemGNURsyncPath()
+	wantRealMove := gnuRsync != ""
+	if wantRealMove {
+		t.Setenv("FLASHBACKUP_RSYNC_PATH_FOR_TEST", gnuRsync)
+	}
+
+	code, _, stderr := runCaptureStdin(t,
+		[]string{"flashbackup", "backup", "--move", "movetest", dest},
+		"DELETE\n",
+	)
+
+	// runs.ndjson must have 2 lines regardless of rsync flavour: the
+	// runner was invoked. (Decline branch above asserts ZERO lines.)
+	runsPath := filepath.Join(dest, ".flashbackup", "runs.ndjson")
+	runs := readBackupNDJSON(t, runsPath)
+	if len(runs) != 2 {
+		t.Fatalf("runs.ndjson lines = %d; want 2 (started + finished)\nstderr=%s",
+			len(runs), stderr)
+	}
+
+	runID, ok := runs[1]["run_id"].(string)
+	if !ok || runID == "" {
+		t.Fatalf("finished line missing run_id: %v", runs[1])
+	}
+	runDir := filepath.Join(dest, ".flashbackup", "runs", runID)
+
+	if wantRealMove {
+		// Real rsync: exit 0, source files unlinked, deletion-log exists.
+		if code != backupExitCodeOK {
+			t.Errorf("exit code: got %d, want %d (real rsync, move accepted)\nstderr=%s",
+				code, backupExitCodeOK, stderr)
+		}
+		for _, rel := range rels {
+			srcFile := filepath.Join(src, filepath.FromSlash(rel))
+			if _, err := os.Stat(srcFile); err == nil {
+				t.Errorf("source file %q should have been unlinked by move mode", srcFile)
+			}
+		}
+		deletionLog := filepath.Join(runDir, "deletion-log.ndjson")
+		if _, err := os.Stat(deletionLog); err != nil {
+			t.Errorf("deletion-log.ndjson missing at %s: %v", deletionLog, err)
+		}
+	} else {
+		// Placeholder rsync: exit 1 (atomic gate fired; deletion skipped).
+		// The exit status is copy_only_aborted_delete or partial; either
+		// way the cmd-level translator returns runtime. The key signal
+		// is that runner.Run WAS invoked (runs.ndjson has 2 lines).
+		if code != backupExitCodeRuntime {
+			t.Errorf("exit code: got %d, want %d (placeholder rsync, move accepted but no files copied)\nstderr=%s",
+				code, backupExitCodeRuntime, stderr)
+		}
+		// Source files still on disk (T3 skipped by atomic gate).
+		for _, rel := range rels {
+			srcFile := filepath.Join(src, filepath.FromSlash(rel))
+			if _, err := os.Stat(srcFile); err != nil {
+				t.Errorf("source file %q must remain when atomic gate fires: %v", srcFile, err)
+			}
+		}
+	}
 }
 
 // TestBackup_NonexistentProfile: init then `backup with-name-that-does-not-

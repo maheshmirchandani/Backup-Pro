@@ -14,10 +14,24 @@ import (
 // runCapture exercises run() with a fresh stdout / stderr buffer pair so
 // each test gets isolated assertions. Returns (code, stdout, stderr) so the
 // table-driven cases below can do all three assertions inline.
+//
+// Stdin is an empty bytes.Buffer; cases that need to exercise the move-mode
+// DELETE prompt (Task 37) use runCaptureStdin instead so they can preload
+// a "DELETE\n" or other token line.
 func runCapture(t *testing.T, argv []string) (int, string, string) {
 	t.Helper()
+	return runCaptureStdin(t, argv, "")
+}
+
+// runCaptureStdin is the stdin-aware variant of runCapture. The stdin
+// argument is preloaded into a bytes.Buffer so the scanner inside
+// runBackup's promptDeleteConfirm reads it as a single non-blocking line
+// (or sees EOF if stdin is the empty string).
+func runCaptureStdin(t *testing.T, argv []string, stdin string) (int, string, string) {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), argv, &stdout, &stderr)
+	in := bytes.NewBufferString(stdin)
+	code := run(context.Background(), argv, in, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
 
