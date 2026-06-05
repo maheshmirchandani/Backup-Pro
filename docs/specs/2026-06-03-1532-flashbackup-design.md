@@ -697,8 +697,11 @@ GIVEN a backup is running (lock held), WHEN a second `flashbackup` invocation is
 **AC-12: Stale lock recovery.**
 GIVEN a lock file exists but the recorded PID is not running (or PID exists but with a different start_time/host_uuid/nonce), WHEN user runs `flashbackup`, THEN preflight detects the stale lock, takes the lock, and proceeds normally.
 
-**AC-13: Crash recovery via rsync --partial.**
-GIVEN a backup was killed mid-T1 with partial files copied, WHEN user re-runs the same backup, THEN preflight detects the orphaned run, rsync resumes via `--partial` and completes the partial files, T2 verifies all files, and exit code is 0.
+**AC-13a: Crash detection and orphan finalization.**
+GIVEN a backup was killed mid-T1, WHEN user re-runs the same backup, THEN the next run's preflight detects the orphaned `started` line in runs.ndjson and writes a synthetic `finished` line with `exit_status=crashed_resumed`, preserving the orphan's `started_at` and stamping `finished_at` at recovery time. (Split from original AC-13 2026-06-05 per Task 50 review A1.)
+
+**AC-13b: Crash recovery via rsync --partial resume.**
+GIVEN a backup was killed mid-T1 with partial files on the dest, WHEN user re-runs the same backup, THEN rsync resumes the partial files via `--partial` (does not re-transfer from zero), T2 verifies all files, and the new run exits 0. (Split from original AC-13; exercising this requires a fixture larger than tiny so the `--partial` resume math is observable. Queued as Task 50b.)
 
 **AC-14: --delete protects user-added files.**
 GIVEN destination contains a manually-copied `<USB>/<hostname>-me/Documents/manual.txt` never written by FlashBackup, WHEN user runs backup with `--delete` (mirror mode), THEN `manual.txt` remains untouched, summary shows `files_extra_in_dest = 1`, and exit code is 0.
@@ -738,7 +741,8 @@ Every AC has a recorded implementation and test location. Maintained alongside t
 | AC-10 verify reports counters | `internal/verify` | `test/e2e/verify_test.go` (`TestE2E_VerifyIntact_MissingFile` + `_HashMismatch`) |
 | AC-11 concurrency lock | `internal/preflight` | `test/e2e/lock_test.go` (`TestE2E_LockContention_HeldBlocksConcurrentBackup`) |
 | AC-12 stale lock recovery | `internal/preflight` | `test/e2e/lock_test.go` (`TestE2E_LockContention_StaleLockBypassed`) |
-| AC-13 crash recovery rsync --partial | `internal/runner` + `internal/rsync` | `test/e2e/crash_resume_test.go` |
+| AC-13a crash detection + orphan finalization | `internal/preflight` (gate queued as Task 50a) | `test/e2e/crash_resume_test.go` (skip until 50a ships) |
+| AC-13b crash recovery rsync --partial resume | `internal/runner` + `internal/rsync` | future test (queued as Task 50b; requires fixture >tiny) |
 | AC-14 --delete protects user files | `internal/runner` | `test/e2e/delete_flag_protects_test.go` |
 | AC-15 non-TTY fallback | `internal/tui` | `test/e2e/non_tty_test.go` |
 | AC-16 terminal too small | `internal/tui` | `test/e2e/terminal_size_test.go` |
