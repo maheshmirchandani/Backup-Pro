@@ -2,37 +2,31 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, HALTED on GitHub Actions billing block after Task 31)
+## Project status (2026-06-05, after Tasks 32 + 31-review-approve + 30-minors + CI split + repo public)
 
-**Phase:** Plan 1 execution. Tasks 1-31 complete in code; commit head `c3f2ca0` (CI split). HALTED on CI: GitHub Actions returned the annotation "The job was not started because recent account payments have failed or your spending limit needs to be increased" on all jobs (Linux AND macOS), starting with the Task 29 review fix commit `06a4255` and persisting through `c3f2ca0`. This is an account-level billing block, not a runner-type quota.
+**Phase:** Plan 1 execution. Tasks 1-32 complete; runner package complete; verify package complete (load + rehash + top-level Verify). Repo is now PUBLIC at https://github.com/maheshmirchandani/Backup-Pro (flipped 2026-06-05 to resolve a GitHub Actions billing block; secret-scan over full history was clean before flip). CI green across all five jobs (test-linux, test, e2e-fast, e2e-safety, bench). Next: Task 32 review + Task 33 implementer (`internal/plain` renderer) in overlap.
 
-**Resume protocol (next session):**
+**CI architecture (commits `c3f2ca0`, `b297cc4`):** `.github/workflows/ci.yml` has `test-linux` on ubuntu-latest for portable packages (hash, state, profiles, paths, selection, runner/types, verify/*) plus lint + vet. macOS `test` job narrowed to macOS-only packages (drives, preflight subtree, rsync, runner). `bench` on ubuntu. `e2e-fast` + `e2e-safety` stay on macos-14 (need hdiutil + APFS mounts). Docs-only commits skip CI via `paths-ignore`. Public repo → unlimited Actions minutes across all runner OSes.
 
-1. MM resolves billing at https://github.com/settings/billing (failed payment retry OR raise spending limit).
-2. `gh run rerun 26995126512` (or trigger a fresh CI cycle on `c3f2ca0`). Confirm test-linux + test + e2e-fast + e2e-safety + bench all green.
-3. Apply Task 30 review minor fixes (3 minors logged in Task 30 review verdict: pipeline-order doc note, mid-stream V-mismatch test gap, LoadResult invariant assertion).
-4. Dispatch Task 31 spec+quality review subagent (never dispatched due to CI halt).
-5. Resume the overlap cycle: Task 31 review + Task 32 implementer in parallel.
-6. Continue per `superpowers:subagent-driven-development` with the dispatch protocol below (implementer runs `go vet && gofmt -s -l && go test -race && make coverage` locally before push; combined spec+quality review after each push; minor findings inline).
-
-**CI split in place (commit `c3f2ca0`):** `.github/workflows/ci.yml` now has a new `test-linux` job on ubuntu-latest that handles the portable packages (hash, state, profiles, paths, selection, runner/types, verify/*) plus lint and vet. The macOS `test` job is narrowed to the macOS-only packages (drives, preflight subtree, rsync, runner). `bench` moved to ubuntu (pure SHA256 path). `e2e-fast` and `e2e-safety` stay on macos-14 (need hdiutil + APFS mounts). Docs-only commits skip CI via `paths-ignore`. Effective macOS-min burn per push estimated to drop from ~80 to ~50.
+**Dispatch protocol (still in force):** Every implementer subagent runs `go vet && gofmt -s -l && go test -race && make coverage` locally before commit. Combined spec+quality review dispatched after each push; minor findings applied inline. Subagent-driven, overlap-CI cycle.
 
 **Dispatch protocol amendment (2026-06-04, post-CI-rescue, still in force).** Every implementer subagent MUST run `go vet && gofmt -s -l && go test -race && make coverage` locally before committing. Bare `gofmt -l` accepts list-indent shapes the simplifier (`-s`) rewrites; CI's golangci-lint runs the -s variant, so local must too. Statement-weighted tree totals are the coverage gate.
 
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (31/58):**
+**Tasks complete (32/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
 23-27. Runner phase functions: T0+ enumerate, T1 transfer, T2 hash+compare, T3 delete-source, T4 finalize
-28. Fault-injection DSL + release stub (commit `6e958fe`)
+28. Fault-injection DSL + release stub (commit `6e958fe`; review fixes in `8461b0f`)
 29. Top-level runner.Run state machine + faultinject hooks in t2/t3/t4 (commit `da24cd1`; review fixes in `06a4255`)
-30. internal/verify/load manifest reader with inline HMAC verification (commit `14f73e0`)
-31. internal/verify/rehash per-file rehash + classify (commit `838faee`)
+30. internal/verify/load manifest reader with inline HMAC verification (commit `14f73e0`; review minors in `12204ae`)
+31. internal/verify/rehash per-file rehash + classify (commit `838faee`; review verdict approve, minor #1 wording polish applied inline)
+32. internal/verify top-level Verify state machine (commit `8a5047b`; integrates load + rehash; writes per-verify summary.json)
 
-**Tasks remaining (27):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 32 (verify top-level), 33 (plain renderer), 34-41 (cmd/flashbackup CLI subcommands), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (26):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 33 (plain renderer), 34-41 (cmd/flashbackup CLI subcommands), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -76,6 +70,38 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (post-billing-rescue): Task 32 (verify top-level) + Task 31 review + CI split + repo public
+
+After the GitHub Actions billing block halted the cycle for several hours, MM flipped the repo public to permanently fix the Actions quota issue (public repos get unlimited minutes across all runner OSes). Secret-scan over full git history (grep for api keys, tokens, passwords, PEM blocks, AWS/Stripe key formats) was clean before the flip. Repo is now public at `https://github.com/maheshmirchandani/Backup-Pro`; GPLv3 license unchanged.
+
+CI split landed in two commits during the halt and was validated post-flip:
+- `c3f2ca0`: split portable tests to ubuntu (`test-linux` job for hash/state/profiles/paths/selection/runner-types/verify), keep macOS-only packages (drives/preflight-subtree/rsync/runner) on the `test` job, move `bench` to ubuntu, add `paths-ignore: docs/**` so docs-only commits skip CI.
+- `b297cc4`: narrow the Linux `go vet` step to the portable package list and add a `GOOS=darwin go vet ./...` cross-check (the original `go vet ./...` on Linux tripped on macOS-only test files that reference darwin-only symbols).
+
+Task 30 review minor fixes landed in `12204ae`: doc.go now documents the pipeline-order deviation (ReadVersionFile BEFORE manifest gzip open) and master plan amendment is queued; `TestLoad_WrongSchemaVersionMidStream` locks the abort-mid-loop behavior so a V=99 line after a clean V=1 prefix cannot be silently collected; `TestLoad_EntriesScannedInvariant` exercises the mixed-outcome case (3 verified + 1 tampered + 1 bad JSON) and asserts `EntriesScanned == len(Entries) + len(IntegrityErrors) + len(SchemaErrors)`.
+
+Task 31 (`internal/verify/rehash`) review came back **approve** with three minor findings only:
+- Minor #1 (cosmetic): `nolint:gosec G304` comment under-stated upstream HMAC validation. Reworded inline to explicitly cite invariant #33 and the bounded-input justification.
+- Minor #2 (low-priority): cancelled-mid-hash file is classified `StatusUnreadable` instead of detecting `ctx.Canceled`. Mirrors t3's existing pattern; at most one file mis-classified per cancel; deferred.
+- Minor #3 (Task 33 concern): `UIEvent.Phase` cast for verify uses a string outside the runner Phase enum; renderer-side note when Task 33 lands.
+
+Task 32 (`internal/verify/verify.go`) shipped commit `8a5047b`: top-level `Verify(ctx, opts) (*VerifyResult, error)` stitches preflight → resolve RunID (latest/explicit/All) → load.Load → rehash.Rehash → optional CheckExtras walk → aggregate VerifyResult → write summary.json → emit UIEvtSummary. 27 tests (11 unit + 16 e2e behind `FLASHBACKUP_E2E=1`). Coverage 85.1%. `FilesIntegrityFailed` sources from `LoadResult.IntegrityErrors` (AC-19 path); `FilesHashMismatch` etc. from `Result`. ExitStatus is `integrity_failed` when any per-file failure or load schema error fired, `preflight_failed` on preflight error, `ok` otherwise. summary.json lands at `<DotDir>/runs/<runID>/verifications/<verifyID>/summary.json` with the locked schema; mode 0o644.
+
+Design decisions worth recording:
+- All-mode aggregate uses RunID sentinel "all" (distinguishable from any canonical timestamp-prefixed RunID).
+- Per-run pipeline error in All mode does NOT abort the batch; bad run is skipped, aggregate ExitStatus degrades to integrity_failed.
+- CheckExtras is a `filepath.WalkDir` over the namespaced dest comparing to the manifest path set; just produces a count.
+- Verify reuses preflight (single call at top; `defer pc.Release()`).
+- Rehash mid-loop cancellation: partial Result still writes summary.json (forensic), then surfaces wrapped error.
+
+Punted items for later:
+- `internal/testutil` shared mount helpers (duplicated across runner_test.go + verify_test.go; at 2 copies, deferred until 3).
+- `runIDPattern` + `manifestBaseFilename` duplicated between `verify.go` and `runner/t5_finalize.go`; if drift becomes real, a guard test or shared constants package would address it.
+- Coverage gate Makefile target doesn't yet include `internal/verify`; add when Task 38 wires the CLI.
+- `results.ndjson` (per-file verify outcomes) is in design spec section 5 but NOT in Task 32's master plan deliverable; left for an explicit spec callout.
+
+Commits this segment: `c3f2ca0` (CI split), `62a8f06` (BACKLOG reconciliation), `b297cc4` (CI vet narrow), `12204ae` (Task 30 minors), `8a5047b` (Task 32 impl).
 
 ### 2026-06-04 (later night): Task 31 (verify/rehash)
 

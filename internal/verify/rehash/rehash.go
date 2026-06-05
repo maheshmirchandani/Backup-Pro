@@ -253,7 +253,12 @@ func classify(ctx context.Context, destRoot, host, user string, entry state.Mani
 		}
 	}
 
-	f, err := os.Open(destPath) //nolint:gosec // path derives from manifest entry under DestRoot
+	// destPath derives from entry.Path, which load.go validated against the
+	// per-USB HMAC (invariant #33) before the entry surfaced here. Upstream
+	// selection.Walk produced RelativePath via filepath.Rel so the path
+	// cannot escape DestRoot under the namespace prefix. Bounded input;
+	// G304 false-positive.
+	f, err := os.Open(destPath) //nolint:gosec // bounded: HMAC-validated entry.Path under DestRoot namespace
 	if err != nil {
 		return FileResult{
 			Entry:      entry,
