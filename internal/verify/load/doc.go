@@ -3,6 +3,15 @@
 // reader counterpart of internal/state.ndjsonManifestStore and the input
 // stage of the `flashbackup verify` command (Tasks 30 to 32).
 //
+// Pipeline order: ReadVersionFile runs BEFORE the manifest's gzip stream is
+// opened. This is a deliberate deviation from the literal master plan
+// wording (line 2479: "open gzip stream -> ReadVersionFile") — the swap
+// gives fail-closed-on-version coverage WITHOUT spending a file descriptor
+// on a manifest that is structurally unreadable. Both orderings satisfy
+// the security guarantee that no entry is decoded before the version file
+// is validated; the impl chose the cheaper one. The plan text will be
+// amended in the next plan touch to reflect the actual order.
+//
 // Invariants enforced:
 //   - Fail-closed version file load (invariant #11): missing, unparseable,
 //     wrong schema_version, or invalid HMAC-key shapes abort with a wrapped

@@ -331,6 +331,146 @@ func TestLoad_WrongSchemaVersion(t *testing.T) {
 	}
 }
 
+// TestLoad_WrongSchemaVersionMidStream locks the abort-mid-loop behavior:
+// a V=99 line appearing AFTER several legitimate V=1 entries must still
+// fail the whole load with a pipeline error (not be quietly collected
+// into SchemaErrors). Task 30 review (2026-06-04) flagged that the
+// single-entry test alone did not lock this; without this regression
+// guard a future implementation could special-case "first-entry-only"
+// and silently accept rogue lines after a clean prefix.
+func TestLoad_WrongSchemaVersionMidStream(t *testing.T) {
+	fx := newFixture(t)
+	ctx := context.Background()
+
+	// Seed 3 legitimate V=1 entries via the store.
+	entries := []state.ManifestEntry{
+		sampleEntry("a.txt", 10, "aaaa"),
+		sampleEntry("b.txt", 20, "bbbb"),
+		sampleEntry("c.txt", 30, "cccc"),
+	}
+	for _, e := range entries {
+		if err := fx.store.AppendEntry(ctx, e); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	finalizeStore(t, fx.store)
+
+	// Inject a V=99 line AFTER the legitimate prefix.
+	raw := gunzipFile(t, fx.manifestGz)
+	lines := bytes.Split(bytes.TrimRight(raw, "\n"), []byte("\n"))
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 seed lines, got %d", len(lines))
+	}
+	rogue := state.ManifestEntry{
+		V:            99,
+		Path:         "rogue.txt",
+		Size:         1,
+		MtimeNS:      1,
+		SHA256Source: "x",
+		CopiedAt:     time.Unix(0, 0).UTC(),
+		Status:       state.StatusVerified,
+		HMAC:         "0",
+	}
+	rogueBytes, err := json.Marshal(rogue)
+	if err != nil {
+		t.Fatalf("marshal rogue: %v", err)
+	}
+	injected := append(append([][]byte{}, lines...), rogueBytes)
+	repacked := bytes.Join(injected, []byte("\n"))
+	repacked = append(repacked, '\n')
+	writeGzipFile(t, fx.manifestGz, repacked)
+
+	_, err = load.Load(ctx, load.LoadOptions{
+		ManifestPath:    fx.manifestGz,
+		VersionFilePath: fx.versionPath,
+	})
+	if err == nil {
+		t.Fatal("expected pipeline error for mid-stream V=99 line")
+	}
+	if !strings.Contains(err.Error(), "schema_version") {
+		t.Errorf("error: got %q want contains 'schema_version'", err.Error())
+	}
+	// The error MUST mention a line number greater than 1 so support
+	// tooling can point an operator at the offending line. Anchoring on
+	// "line 4" specifically would over-fit; the principle is "not the
+	// first line" so any of "line 2", "line 3", "line 4" is acceptable
+	// (the implementation reports line 4 today; the test tolerates
+	// future cadence changes).
+	if !strings.Contains(err.Error(), "line ") {
+		t.Errorf("error: got %q want contains 'line <N>'", err.Error())
+	}
+	for _, badPrefix := range []string{"line 0", "line 1\""} {
+		if strings.Contains(err.Error(), badPrefix) {
+			t.Errorf("error reports line %q; mid-stream abort must point past the legitimate prefix", badPrefix)
+		}
+	}
+}
+
+// TestLoad_EntriesScannedInvariant locks the LoadResult arithmetic
+// invariant documented in doc.go and at load.go's package-comment:
+// EntriesScanned == len(Entries) + len(IntegrityErrors) + len(SchemaErrors).
+// Task 30 review (2026-06-04) flagged that no single test asserted the
+// equality directly. Exercises the mixed-outcome case (verified +
+// tampered + bad JSON in one load) so a future code path that
+// increments EntriesScanned without appending to one of the three
+// slices is caught immediately.
+func TestLoad_EntriesScannedInvariant(t *testing.T) {
+	fx := newFixture(t)
+	ctx := context.Background()
+
+	// Seed: 4 legitimate entries. We will tamper one and inject a bad
+	// JSON line, leaving 3 verified + 1 tampered + 1 bad json = 5
+	// scanned.
+	entries := []state.ManifestEntry{
+		sampleEntry("a.txt", 10, "aaaa"),
+		sampleEntry("b.txt", 20, "bbbb"),
+		sampleEntry("c.txt", 30, "cccc"),
+		sampleEntry("d.txt", 40, "dddd"),
+	}
+	for _, e := range entries {
+		if err := fx.store.AppendEntry(ctx, e); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	finalizeStore(t, fx.store)
+
+	raw := gunzipFile(t, fx.manifestGz)
+	lines := bytes.Split(bytes.TrimRight(raw, "\n"), []byte("\n"))
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 seed lines, got %d", len(lines))
+	}
+	// Tamper line 2: replace one byte in the JSON body so HMAC fails.
+	tampered := bytes.Replace(lines[1], []byte(`"path":"b.txt"`), []byte(`"path":"X.txt"`), 1)
+	// Inject a malformed JSON line in the middle.
+	repackedLines := [][]byte{lines[0], tampered, lines[2], []byte("{this is not valid json"), lines[3]}
+	repacked := bytes.Join(repackedLines, []byte("\n"))
+	repacked = append(repacked, '\n')
+	writeGzipFile(t, fx.manifestGz, repacked)
+
+	res, err := load.Load(ctx, load.LoadOptions{
+		ManifestPath:    fx.manifestGz,
+		VersionFilePath: fx.versionPath,
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := len(res.Entries), 3; got != want {
+		t.Errorf("Entries: got %d want %d", got, want)
+	}
+	if got, want := len(res.IntegrityErrors), 1; got != want {
+		t.Errorf("IntegrityErrors: got %d want %d", got, want)
+	}
+	if got, want := len(res.SchemaErrors), 1; got != want {
+		t.Errorf("SchemaErrors: got %d want %d", got, want)
+	}
+	sum := len(res.Entries) + len(res.IntegrityErrors) + len(res.SchemaErrors)
+	if res.EntriesScanned != sum {
+		t.Errorf("invariant violation: EntriesScanned (%d) != sum of slices (%d) "+
+			"(Entries=%d, IntegrityErrors=%d, SchemaErrors=%d)",
+			res.EntriesScanned, sum, len(res.Entries), len(res.IntegrityErrors), len(res.SchemaErrors))
+	}
+}
+
 func TestLoad_MissingManifestFile(t *testing.T) {
 	fx := newFixture(t)
 	ctx := context.Background()
