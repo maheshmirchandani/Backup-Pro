@@ -2,9 +2,13 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05): PLAN 1 COMPLETE; tagged v0.1.0-core
+## Project status (2026-06-05): PLAN 1 COMPLETE; v0.1.0-core tagged at `b39a11c`; CI green at `27558c9`
 
-**Phase:** Plan 1 DONE. Tasks 1-55 shipped; v0.1.0-core tag created at commit `b39a11c` (tag object SHA `466dc65`) and pushed to origin. Repo public. CI green. Runner + verify + plain renderer + cmd/flashbackup (init/backup/verify/status/profiles/help) + 12 e2e tests + ERROR_CATALOG + README + DOGFOOD all done. Move-mode atomic gate working end-to-end. faultinject DSL + release stub clean of symbols.
+**Phase:** Plan 1 DONE. Tasks 1-55 shipped; v0.1.0-core tag at commit `b39a11c` (tag object SHA `466dc65`), pushed to origin. Repo public. CI green at HEAD `27558c9` (post-tag gosec G204 nolint commit; test-file lint comments only; binary at `b39a11c` is functionally identical to `27558c9` since nolint comments don't affect compiled output).
+
+**Known post-tag CI fix:** `27558c9 fix(e2e+lint): gosec G204 nolint comments for bounded test exec.Command sites` resolves CI without changing runtime behavior. Optional next-session action: retag v0.1.0-core to `27558c9` (requires `git push --force origin v0.1.0-core` — gated by auto-mode classifier; needs explicit user authorization). For Phase 0 dogfood with no external adopters yet, leaving the tag at `b39a11c` is the lower-risk default.
+
+Runner + verify + plain renderer + cmd/flashbackup (init/backup/verify/status/profiles/help) + 12 e2e tests + ERROR_CATALOG + README + DOGFOOD all done. Move-mode atomic gate working end-to-end. faultinject DSL + release stub clean of symbols.
 
 **Queued for Plan 2 (out of v0.1.0-core scope):**
 - 22a: unowned T0 event Kinds wiring (lock_acquired, lock_stale_detected, lock_contention, filesystem_refused, volume_uuid_changed).
