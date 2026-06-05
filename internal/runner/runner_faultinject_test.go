@@ -10,6 +10,7 @@ import (
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/profiles"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
 
 // TestRun_AtomicGateClosesUnderCorrupt exercises the atomic-gate path: the
@@ -22,9 +23,9 @@ import (
 // Requires FLASHBACKUP_E2E=1 (mounts a DMG) and a GNU rsync (Apple's
 // openrsync is incompatible).
 func TestRun_AtomicGateClosesUnderCorrupt(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	rsyncPath := requireSystemRsync(t)
 	dest := setupDest(t)
@@ -97,9 +98,9 @@ func TestRun_AtomicGateClosesUnderCorrupt(t *testing.T) {
 // ExitStatus=partial. T3 still runs but the copy-mode short-circuit
 // inside T4 (delete-source phase) means no source is touched.
 func TestRun_PartialUnderCopyMode(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	rsyncPath := requireSystemRsync(t)
 	dest := setupDest(t)
@@ -141,9 +142,9 @@ func TestRun_PartialUnderCopyMode(t *testing.T) {
 // no further phase runs. ExitStatus is left unset by the failure path; the
 // caller sees a non-nil error.
 func TestRun_KillFaultAbortsRun(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	rsyncPath := requireSystemRsync(t)
 	dest := setupDest(t)

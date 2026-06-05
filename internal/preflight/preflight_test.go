@@ -2,97 +2,21 @@ package preflight
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
-
-const (
-	diskutilPath = "/usr/sbin/diskutil"
-	hdiutilPath  = "/usr/bin/hdiutil"
-)
-
-func requireMacOS(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skipf("preflight is macOS-only; runtime.GOOS=%s", runtime.GOOS)
-	}
-}
-
-// requireDiskutil skips when /usr/sbin/diskutil is absent. volume_uuid.Capture
-// shells out to diskutil; without it gate 5 cannot succeed.
-func requireDiskutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(diskutilPath); err != nil {
-		t.Skipf("%s not available: %v", diskutilPath, err)
-	}
-}
-
-// requireHdiutil skips when /usr/bin/hdiutil is absent. We need it to create
-// a temporary APFS volume so that gate 5 (volume_uuid.Capture) succeeds;
-// arbitrary tempdirs under /var/folders are not queryable by diskutil.
-func requireHdiutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(hdiutilPath); err != nil {
-		t.Skipf("%s not available: %v", hdiutilPath, err)
-	}
-}
-
-// mountTempVolume creates a small APFS DMG, attaches it under /Volumes, and
-// returns the mountpoint. Cleanup detaches the DMG and removes the image file.
-// Skips the test on attach failure (sandbox restrictions, low disk, etc.).
-func mountTempVolume(t *testing.T) string {
-	t.Helper()
-	requireHdiutil(t)
-
-	// Unique volume name so parallel test runs do not collide.
-	volname := fmt.Sprintf("FlashbackupPreflight%d", time.Now().UnixNano())
-	dmgPath := filepath.Join(t.TempDir(), volname+".dmg")
-
-	// 10MB is enough to hold .flashbackup/* and the placeholder rsync.
-	cmd := exec.Command(hdiutilPath, "create",
-		"-size", "10m",
-		"-fs", "APFS",
-		"-volname", volname,
-		"-ov",
-		"-attach",
-		dmgPath,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Skipf("hdiutil create failed (likely sandbox-restricted environment): %v\n%s", err, out)
-	}
-	mountpoint := "/Volumes/" + volname
-
-	// Sanity-check that the mount actually appeared. hdiutil sometimes
-	// returns success while leaving the volume unmounted on sandboxed runs.
-	if _, statErr := os.Stat(mountpoint); statErr != nil {
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-		t.Skipf("hdiutil attach succeeded but mountpoint %q is absent: %v", mountpoint, statErr)
-	}
-
-	t.Cleanup(func() {
-		// detach is best-effort: failure here would surface as a leaked
-		// /Volumes entry, not a test correctness issue.
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-	})
-
-	return mountpoint
-}
 
 // setupDest mounts a fresh APFS DMG, seeds it with a valid version.json
 // (so the FAIL-CLOSED gate 8 passes), and returns the mountpoint + captured
-// VersionFile.
+// VersionFile. Mount + skip plumbing lives in internal/testutil now.
 func setupDest(t *testing.T) (string, state.VersionFile) {
 	t.Helper()
-	dest := mountTempVolume(t)
+	dest := testutil.MountTempVolume(t, "APFS")
 	dotDir := filepath.Join(dest, ".flashbackup")
 	if err := os.MkdirAll(dotDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -106,8 +30,8 @@ func setupDest(t *testing.T) (string, state.VersionFile) {
 }
 
 func TestPreflight_HappyPath(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	ctx := context.Background()
@@ -160,7 +84,7 @@ func TestPreflight_EmptyDestRoot(t *testing.T) {
 }
 
 func TestPreflight_DestRootNotExist(t *testing.T) {
-	requireMacOS(t)
+	testutil.RequireMacOS(t)
 	_, err := Preflight(context.Background(), Options{
 		DestRoot:     "/nonexistent/never/will-exist-flashbackup-test",
 		SkipCodesign: true,
@@ -171,12 +95,12 @@ func TestPreflight_DestRootNotExist(t *testing.T) {
 }
 
 func TestPreflight_NoVersionFile_FailsClosed(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	// Mount a clean volume but skip the version.json init step.
 	// Gates 1-7 should pass; gate 8 must fail.
-	dest := mountTempVolume(t)
+	dest := testutil.MountTempVolume(t, "APFS")
 	pc, err := Preflight(context.Background(), Options{DestRoot: dest, SkipCodesign: true})
 	if err == nil {
 		if pc != nil {
@@ -214,8 +138,8 @@ func TestPreflight_VerifyVolumeUnchanged_NilReceiver(t *testing.T) {
 }
 
 func TestPreflight_VerifyVolumeUnchanged_NilUUID(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	ctx := context.Background()
@@ -238,8 +162,8 @@ func TestPreflight_VerifyVolumeUnchanged_NilUUID(t *testing.T) {
 }
 
 func TestPreflight_VerifyVolumeUnchanged_NilSymlinkBaseline(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	ctx := context.Background()
@@ -262,8 +186,8 @@ func TestPreflight_VerifyVolumeUnchanged_NilSymlinkBaseline(t *testing.T) {
 }
 
 func TestPreflight_ReleaseRemovesLock(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	pc, err := Preflight(context.Background(), Options{DestRoot: dest, SkipCodesign: true})
@@ -283,8 +207,8 @@ func TestPreflight_ReleaseRemovesLock(t *testing.T) {
 }
 
 func TestPreflight_DoubleReleaseOK(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	pc, err := Preflight(context.Background(), Options{DestRoot: dest, SkipCodesign: true})
@@ -300,8 +224,8 @@ func TestPreflight_DoubleReleaseOK(t *testing.T) {
 }
 
 func TestPreflight_VerifyVolumeUnchanged_HappyPath(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _ := setupDest(t)
 	ctx := context.Background()

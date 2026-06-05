@@ -8,12 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +19,7 @@ import (
 	"github.com/maheshmirchandani/Backup-Pro/internal/paths"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 	"github.com/maheshmirchandani/Backup-Pro/internal/verify/load"
 	"github.com/maheshmirchandani/Backup-Pro/internal/verify/rehash"
 )
@@ -42,76 +40,18 @@ import (
 // ----------------------------------------------------------------------------
 // Mount + DMG helpers
 // ----------------------------------------------------------------------------
-
-const (
-	diskutilPath = "/usr/sbin/diskutil"
-	hdiutilPath  = "/usr/bin/hdiutil"
-)
-
-func requireE2E(t *testing.T) {
-	t.Helper()
-	if os.Getenv("FLASHBACKUP_E2E") != "1" {
-		t.Skip("requires FLASHBACKUP_E2E=1 (mounts a DMG via hdiutil)")
-	}
-}
-
-func requireMacOS(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skipf("verify e2e tests are macOS-only; runtime.GOOS=%s", runtime.GOOS)
-	}
-}
-
-func requireDiskutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(diskutilPath); err != nil {
-		t.Skipf("%s not available: %v", diskutilPath, err)
-	}
-}
-
-func requireHdiutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(hdiutilPath); err != nil {
-		t.Skipf("%s not available: %v", hdiutilPath, err)
-	}
-}
-
-// mountTempVolume creates a 10 MB APFS DMG and attaches it under /Volumes.
-// Mirrors internal/runner.mountTempVolume; duplicated to avoid a
-// test-only import cycle with the runner package.
-func mountTempVolume(t *testing.T) string {
-	t.Helper()
-	requireHdiutil(t)
-	volname := fmt.Sprintf("FlashbackupVerify%d", time.Now().UnixNano())
-	dmgPath := filepath.Join(t.TempDir(), volname+".dmg")
-	out, err := exec.Command(hdiutilPath, "create",
-		"-size", "10m",
-		"-fs", "APFS",
-		"-volname", volname,
-		"-ov",
-		"-attach",
-		dmgPath,
-	).CombinedOutput()
-	if err != nil {
-		t.Skipf("hdiutil create failed (likely sandbox-restricted): %v\n%s", err, out)
-	}
-	mountpoint := "/Volumes/" + volname
-	if _, statErr := os.Stat(mountpoint); statErr != nil {
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-		t.Skipf("hdiutil attach succeeded but mountpoint %q is absent: %v", mountpoint, statErr)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-	})
-	return mountpoint
-}
+//
+// Shared mount + skip helpers (RequireMacOS / RequireDiskutil / RequireE2E /
+// RequireHdiutil / MountTempVolume) live in internal/testutil. The verify-
+// specific test scaffolding (plantRun, plantedRun, recordingRenderer, etc.)
+// stays local.
 
 // setupDest mounts a fresh APFS DMG and seeds it with a valid version.json.
 // The hostname/username helpers are also exposed so tests can write
 // namespaced dest files to the same prefix verify will look at.
 func setupDest(t *testing.T) (destRoot, hostname, username string) {
 	t.Helper()
-	dest := mountTempVolume(t)
+	dest := testutil.MountTempVolume(t, "APFS")
 	dotDir := filepath.Join(dest, ".flashbackup")
 	if err := os.MkdirAll(dotDir, 0o700); err != nil {
 		t.Fatalf("mkdir dot dir: %v", err)
@@ -747,9 +687,9 @@ func TestAggregatedRunID(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestVerify_HappyPath(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(1)
@@ -802,9 +742,9 @@ func TestVerify_HappyPath(t *testing.T) {
 func TestVerify_TamperedManifest(t *testing.T) {
 	// AC-19: an HMAC-failed manifest line must surface as
 	// FilesIntegrityFailed and force ExitStatus=integrity_failed.
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(2)
@@ -834,9 +774,9 @@ func TestVerify_TamperedManifest(t *testing.T) {
 }
 
 func TestVerify_HashMismatch(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(3)
@@ -868,9 +808,9 @@ func TestVerify_HashMismatch(t *testing.T) {
 }
 
 func TestVerify_MissingDestFile(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(4)
@@ -902,9 +842,9 @@ func TestVerify_MissingDestFile(t *testing.T) {
 }
 
 func TestVerify_RunIDSpecified(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	// Plant two runs.
@@ -934,9 +874,9 @@ func TestVerify_RunIDSpecified(t *testing.T) {
 }
 
 func TestVerify_RunIDLatest(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	r1 := canonicalRunID(1)
@@ -964,9 +904,9 @@ func TestVerify_RunIDLatest(t *testing.T) {
 }
 
 func TestVerify_RunIDInvalid(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, _, _ := setupDest(t)
 	// RunID matches the canonical pattern but the dir does not exist.
@@ -984,9 +924,9 @@ func TestVerify_RunIDInvalid(t *testing.T) {
 }
 
 func TestVerify_All(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	// Three runs; one tampered.
@@ -1042,9 +982,9 @@ func TestVerify_All(t *testing.T) {
 }
 
 func TestVerify_CheckExtras(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(5)
@@ -1078,9 +1018,9 @@ func TestVerify_CheckExtras(t *testing.T) {
 }
 
 func TestVerify_CheckExtrasOff(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(6)
@@ -1108,13 +1048,13 @@ func TestVerify_CheckExtrasOff(t *testing.T) {
 }
 
 func TestVerify_PreflightFailure(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	// Mount a fresh DMG but do NOT seed version.json so preflight fails
 	// at gate 8 (fail-closed missing version file).
-	dest := mountTempVolume(t)
+	dest := testutil.MountTempVolume(t, "APFS")
 
 	res, err := Verify(context.Background(), VerifyOptions{
 		DestRoot:     dest,
@@ -1129,9 +1069,9 @@ func TestVerify_PreflightFailure(t *testing.T) {
 }
 
 func TestVerify_SummaryJSONContents(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(7)
@@ -1184,9 +1124,9 @@ func TestVerify_SummaryJSONContents(t *testing.T) {
 }
 
 func TestVerify_RendererSummaryEvent(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(8)
@@ -1216,9 +1156,9 @@ func TestVerify_RendererSummaryEvent(t *testing.T) {
 }
 
 func TestVerify_NilRenderer(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest, host, user := setupDest(t)
 	runID := canonicalRunID(9)

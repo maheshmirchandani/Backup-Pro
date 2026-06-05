@@ -5,87 +5,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
 
-// Test helpers reused from internal/preflight/preflight_test.go. Duplicated
-// (not extracted to internal/testutil) because the helpers are small and
-// the runner package's needs may diverge over Tasks 23-27 (e.g., seeding
-// source trees, not just dest volumes). Extract when the duplication count
-// hits three.
-
-const (
-	diskutilPath = "/usr/sbin/diskutil"
-	hdiutilPath  = "/usr/bin/hdiutil"
-)
-
-func requireMacOS(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skipf("runner T0 tests are macOS-only; runtime.GOOS=%s", runtime.GOOS)
-	}
-}
-
-func requireDiskutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(diskutilPath); err != nil {
-		t.Skipf("%s not available: %v", diskutilPath, err)
-	}
-}
-
-func requireHdiutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(hdiutilPath); err != nil {
-		t.Skipf("%s not available: %v", hdiutilPath, err)
-	}
-}
-
-// mountTempVolume mirrors the preflight test helper: creates a 10 MB APFS
-// DMG, attaches it under /Volumes, returns the mountpoint, registers
-// cleanup to detach. Skips when hdiutil refuses (sandbox).
-func mountTempVolume(t *testing.T) string {
-	t.Helper()
-	requireHdiutil(t)
-	volname := fmt.Sprintf("FlashbackupRunner%d", time.Now().UnixNano())
-	dmgPath := filepath.Join(t.TempDir(), volname+".dmg")
-	out, err := exec.Command(hdiutilPath, "create",
-		"-size", "10m",
-		"-fs", "APFS",
-		"-volname", volname,
-		"-ov",
-		"-attach",
-		dmgPath,
-	).CombinedOutput()
-	if err != nil {
-		t.Skipf("hdiutil create failed (likely sandbox-restricted environment): %v\n%s", err, out)
-	}
-	mountpoint := "/Volumes/" + volname
-	if _, statErr := os.Stat(mountpoint); statErr != nil {
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-		t.Skipf("hdiutil attach succeeded but mountpoint %q is absent: %v", mountpoint, statErr)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command(hdiutilPath, "detach", "-force", mountpoint).Run()
-	})
-	return mountpoint
-}
+// Shared mount + skip helpers live in internal/testutil. The runner-package
+// specifics (makeStores, captureRenderer, canonicalRunID, seed* tree helpers)
+// stay local because they are runner-specific scaffolding.
 
 // setupDest mounts a fresh APFS DMG and seeds it with a valid version.json
 // so the preflight FAIL-CLOSED gate 8 passes.
 func setupDest(t *testing.T) string {
 	t.Helper()
-	dest := mountTempVolume(t)
+	dest := testutil.MountTempVolume(t, "APFS")
 	dotDir := filepath.Join(dest, ".flashbackup")
 	if err := os.MkdirAll(dotDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -183,8 +122,8 @@ func (c *captureRenderer) seen() []types.UIEvent {
 const canonicalRunID = "2026-06-04T0900Z-0001"
 
 func TestRunT0Preflight_HappyPath(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -288,8 +227,8 @@ func TestRunT0Preflight_HappyPath(t *testing.T) {
 }
 
 func TestRunT0Preflight_NilUIRendererIsValid(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -316,8 +255,8 @@ func TestRunT0Preflight_NilUIRendererIsValid(t *testing.T) {
 }
 
 func TestRunT0Preflight_RendererErrorIsNonFatal(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -616,8 +555,8 @@ func TestRunT0Preflight_AppendPhaseStartedFails(t *testing.T) {
 // branch where the RunLogStore.AppendStarted call fails: pc must be
 // released (lock returned), no started line written.
 func TestRunT0Preflight_AppendStartedFails(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -657,8 +596,8 @@ func TestRunT0Preflight_AppendStartedFails(t *testing.T) {
 // TestRunT0Preflight_AppendPhaseCompletedFails covers the branch where
 // phase_completed Append fails after AppendStarted succeeded.
 func TestRunT0Preflight_AppendPhaseCompletedFails(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -702,8 +641,8 @@ func TestRunT0Preflight_AppendPhaseCompletedFails(t *testing.T) {
 // TestRunT0Preflight_CheckpointEventStoreFails covers the branch where
 // the events.ndjson Checkpoint at phase end fails.
 func TestRunT0Preflight_CheckpointEventStoreFails(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")
@@ -738,8 +677,8 @@ func TestRunT0Preflight_CheckpointEventStoreFails(t *testing.T) {
 // the runs.ndjson Checkpoint at phase end fails (after events Checkpoint
 // already succeeded).
 func TestRunT0Preflight_CheckpointRunLogStoreFails(t *testing.T) {
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	dest := setupDest(t)
 	dotDir := filepath.Join(dest, ".flashbackup")

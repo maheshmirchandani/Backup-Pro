@@ -14,11 +14,13 @@ import (
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 	"github.com/maheshmirchandani/Backup-Pro/internal/selection"
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
 
-// Tests reuse the helpers defined in t0_preflight_test.go (same package):
-//   - canonicalRunID, captureRenderer, readNDJSON, eventKinds
-//   - requireMacOS, requireDiskutil, mountTempVolume, setupDest
+// Tests reuse:
+//   - canonicalRunID, captureRenderer, readNDJSON, eventKinds (t0_preflight_test.go)
+//   - testutil.RequireMacOS / RequireDiskutil / RequireE2E (internal/testutil)
+//   - setupDest (t0_preflight_test.go)
 //   - seedTree (from t1_enumerate_test.go), seedCandidates (t2_transfer_test.go)
 //
 // The end-to-end tests (TestRun_HappyPathCopy, TestRun_HappyPathMove) use the
@@ -28,17 +30,6 @@ import (
 // hdiutil (sandbox-restricted CI environments cannot create DMGs).
 
 const systemRsyncPath = "/usr/bin/rsync"
-
-// requireE2E skips the test unless FLASHBACKUP_E2E=1 is in the environment.
-// Matches the Makefile gate for e2e-fast / e2e-safety targets; lets `go test
-// ./...` stay fast and hermetic while still allowing local + CI runs to
-// exercise the mounted-DMG path.
-func requireE2E(t *testing.T) {
-	t.Helper()
-	if os.Getenv("FLASHBACKUP_E2E") != "1" {
-		t.Skip("requires FLASHBACKUP_E2E=1 (mounts a DMG, runs real rsync)")
-	}
-}
 
 // requireSystemRsync skips the test if /usr/bin/rsync is missing. Belt-and-
 // suspenders against future macOS releases that move or remove the binary.
@@ -339,9 +330,9 @@ func seedSourceTree(t *testing.T, src string) []string {
 }
 
 func TestRun_HappyPathCopy(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	rsyncPath := requireSystemRsync(t)
 	dest := setupDest(t)
@@ -434,9 +425,9 @@ func TestRun_HappyPathCopy(t *testing.T) {
 }
 
 func TestRun_HappyPathMove(t *testing.T) {
-	requireE2E(t)
-	requireMacOS(t)
-	requireDiskutil(t)
+	testutil.RequireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireDiskutil(t)
 
 	rsyncPath := requireSystemRsync(t)
 	dest := setupDest(t)

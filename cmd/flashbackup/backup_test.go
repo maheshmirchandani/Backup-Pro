@@ -12,6 +12,7 @@ import (
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/paths"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
 
 // ----------------------------------------------------------------------------
@@ -245,8 +246,8 @@ func TestIsTTYWriter(t *testing.T) {
 // ----------------------------------------------------------------------------
 // E2E tests (mount a DMG, init, seed a profile, run backup)
 //
-// Reuse mountTempVolumeFS + clearImmutableForTestInit from init_test.go
-// (same package). The system-rsync override is wired via the
+// Reuse testutil.MountTempVolume + clearImmutableForTestInit (init_test.go,
+// same package). The system-rsync override is wired via the
 // FLASHBACKUP_RSYNC_PATH_FOR_TEST env var (see internal/runner/runner.go);
 // when unset the embedded placeholder rsync is used and the run exits
 // ExitStatusPartial (no real copy happens), which the placeholder-mode
@@ -342,10 +343,10 @@ func seedBackupSourceTree(t *testing.T, src string) []string {
 // This is an E2E test because it needs a real initialized USB volume so
 // the mountpoint check passes and the runBackup flow reaches the prompt.
 func TestBackup_MoveMode_DeclinedWithEmptyStdin(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -379,10 +380,10 @@ func TestBackup_MoveMode_DeclinedWithEmptyStdin(t *testing.T) {
 // must exit 2 (operator-fixable; just re-type). Asserts the runner is
 // NOT invoked (no runs.ndjson entries) so the source tree is untouched.
 func TestBackup_MoveMode_DeclinedWithWrongToken(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -433,10 +434,10 @@ func TestBackup_MoveMode_DeclinedWithWrongToken(t *testing.T) {
 // (exit 1). With real rsync: T1 copies, T2 verifies, T3 unlinks, exit 0.
 // Both branches confirm runner.Run was invoked with ModeMove.
 func TestBackup_MoveMode_AcceptedInvokesRunner(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -512,10 +513,10 @@ func TestBackup_MoveMode_AcceptedInvokesRunner(t *testing.T) {
 // This is the most operator-likely error after a fresh init (forgot to
 // create the profile first).
 func TestBackup_NonexistentProfile(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -545,10 +546,10 @@ func TestBackup_NonexistentProfile(t *testing.T) {
 // copying so T2 classifies all files as failed). Either way the cmd-side
 // plumbing is exercised end-to-end.
 func TestBackup_HappyPath_Copy(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("init failed: code=%d stderr=%s", code, stderr)
 	}

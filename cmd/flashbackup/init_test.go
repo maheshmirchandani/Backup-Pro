@@ -4,89 +4,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/state"
+	"github.com/maheshmirchandani/Backup-Pro/internal/testutil"
 )
 
 // ----------------------------------------------------------------------------
 // Skip / mount helpers
 //
-// Mirror of internal/runner.t0_preflight_test.go and
-// internal/verify.verify_test.go helpers. Duplicated (not extracted to
-// internal/testutil) because cmd/flashbackup cannot import internal
-// test-only helpers without a build-tag dance, and the helpers are small.
-// The two duplications in /internal/ are now joined by this third copy;
-// per the "extract on the third dup" rule a follow-up could move them to
-// internal/testutil with `//go:build darwin` test-only build tag, but
-// that's outside Task 35 scope.
+// Shared helpers (RequireMacOS / RequireE2E / RequireHdiutil / MountTempVolume)
+// live in internal/testutil. This file used to carry a local copy; the A1
+// review amendment extracted it before Task 38 added a seventh duplicate.
 // ----------------------------------------------------------------------------
-
-const (
-	initTestHdiutilPath = "/usr/bin/hdiutil"
-)
-
-func requireMacOS(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skipf("init e2e tests are macOS-only; runtime.GOOS=%s", runtime.GOOS)
-	}
-}
-
-func requireE2E(t *testing.T) {
-	t.Helper()
-	if os.Getenv("FLASHBACKUP_E2E") != "1" {
-		t.Skip("requires FLASHBACKUP_E2E=1 (mounts a DMG via hdiutil)")
-	}
-}
-
-func requireHdiutil(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat(initTestHdiutilPath); err != nil {
-		t.Skipf("%s not available: %v", initTestHdiutilPath, err)
-	}
-}
-
-// mountTempVolumeFS creates a small DMG with the requested filesystem
-// (-fs argument: "APFS", "HFS+", "ExFAT", "MS-DOS", etc.), attaches it
-// under /Volumes, and returns the mountpoint. Cleanup detaches the DMG.
-// Skips the test on hdiutil failure (sandboxed CI, exFAT unsupported,
-// etc.).
-func mountTempVolumeFS(t *testing.T, fsType string) string {
-	t.Helper()
-	requireHdiutil(t)
-	volname := fmt.Sprintf("FlashbackupInit%d", time.Now().UnixNano())
-	dmgPath := filepath.Join(t.TempDir(), volname+".dmg")
-	out, err := exec.Command(initTestHdiutilPath, "create",
-		"-size", "10m",
-		"-fs", fsType,
-		"-volname", volname,
-		"-ov",
-		"-attach",
-		dmgPath,
-	).CombinedOutput()
-	if err != nil {
-		t.Skipf("hdiutil create -fs %s failed (likely sandbox-restricted or unsupported): %v\n%s",
-			fsType, err, out)
-	}
-	mountpoint := "/Volumes/" + volname
-	if _, statErr := os.Stat(mountpoint); statErr != nil {
-		_ = exec.Command(initTestHdiutilPath, "detach", "-force", mountpoint).Run()
-		t.Skipf("hdiutil attach -fs %s succeeded but mountpoint %q absent: %v",
-			fsType, mountpoint, statErr)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command(initTestHdiutilPath, "detach", "-force", mountpoint).Run()
-	})
-	return mountpoint
-}
 
 // ----------------------------------------------------------------------------
 // Unit tests (no DMG; exercise argv parsing + error paths)
@@ -233,10 +166,10 @@ func TestInit_ArgvParsing(t *testing.T) {
 // mode 0o700, .metadata_never_index exists, and the rsync binary landed
 // under .flashbackup/bin/<sha>/rsync.
 func TestInit_HappyPath_APFS(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	code, stdout, stderr := runCapture(t, []string{"flashbackup", "init", dest})
 	if code != 0 {
 		t.Fatalf("init exit code: got %d, want 0\nstderr: %s", code, stderr)
@@ -332,10 +265,10 @@ func TestInit_HappyPath_APFS(t *testing.T) {
 // existing version.json. This is the safety contract that prevents
 // silent HMAC-key rotation (which would invalidate every prior manifest).
 func TestInit_AlreadyInitialized_RefusesWithoutResetKeys(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("first init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -365,10 +298,10 @@ func TestInit_AlreadyInitialized_RefusesWithoutResetKeys(t *testing.T) {
 // 32-byte keys colliding has negligible probability, so a same-key
 // outcome means the rotation did not happen.
 func TestInit_AlreadyInitialized_OverwritesWithResetKeys(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "APFS")
+	dest := testutil.MountTempVolume(t, "APFS")
 	if code, _, stderr := runCapture(t, []string{"flashbackup", "init", dest}); code != 0 {
 		t.Fatalf("first init failed: code=%d stderr=%s", code, stderr)
 	}
@@ -396,10 +329,10 @@ func TestInit_AlreadyInitialized_OverwritesWithResetKeys(t *testing.T) {
 // the test, which is the correct outcome (we cannot prove the gate
 // without a refused-fs fixture). Local macOS test runs hit this path.
 func TestInit_ExFAT_RefusesWithRecipe(t *testing.T) {
-	requireMacOS(t)
-	requireE2E(t)
+	testutil.RequireMacOS(t)
+	testutil.RequireE2E(t)
 
-	dest := mountTempVolumeFS(t, "ExFAT")
+	dest := testutil.MountTempVolume(t, "ExFAT")
 	code, stdout, stderr := runCapture(t, []string{"flashbackup", "init", dest})
 	if code != initExitCodeUsage {
 		t.Fatalf("init on MS-DOS: got %d, want %d\nstdout=%s\nstderr=%s",
@@ -430,7 +363,7 @@ func TestInit_ExFAT_RefusesWithRecipe(t *testing.T) {
 // path's wiring without paying the hdiutil cost, so coverage stays above
 // the >=70% gate for cmd/flashbackup even when FLASHBACKUP_E2E is unset.
 func TestInit_RealAPFS_RunInitDirect(t *testing.T) {
-	requireMacOS(t)
+	testutil.RequireMacOS(t)
 	// Use a tempdir under the system root volume (APFS on modern macOS).
 	// t.TempDir() returns a path under $TMPDIR, which on darwin is a
 	// per-user APFS mount, so filesystem.Inspect will accept it.
@@ -461,7 +394,7 @@ func TestInit_RealAPFS_RunInitDirect(t *testing.T) {
 // second runInit without --reset-keys must refuse. Pure-Go path so it
 // runs on every `go test ./...` on macOS, no hdiutil required.
 func TestInit_RealAPFS_RefusesWithoutResetKeys(t *testing.T) {
-	requireMacOS(t)
+	testutil.RequireMacOS(t)
 	dest := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
@@ -493,7 +426,7 @@ func TestInit_RealAPFS_RefusesWithoutResetKeys(t *testing.T) {
 // TestInit_RealAPFS_ResetKeysRotates: --reset-keys path on a non-DMG
 // fixture; checks that the HMAC key actually changes.
 func TestInit_RealAPFS_ResetKeysRotates(t *testing.T) {
-	requireMacOS(t)
+	testutil.RequireMacOS(t)
 	dest := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
