@@ -158,6 +158,7 @@ func TestRun_KnownStubSubcommand(t *testing.T) {
 	replacedSubcommands := map[string]bool{
 		"init":   true, // Task 35; see init_test.go
 		"backup": true, // Task 36; see backup_test.go
+		"verify": true, // Task 38; see verify_test.go
 	}
 	for _, sc := range subcommandList {
 		if replacedSubcommands[sc.name] {

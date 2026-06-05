@@ -67,7 +67,7 @@ var subcommandList = []struct {
 }{
 	{"init", "Task 35", "initialize a USB volume for FlashBackup", runInit},
 	{"backup", "Task 36 (+ Task 37 move-confirm)", "run a backup using a profile", runBackup},
-	{"verify", "Task 38", "verify the integrity of a prior run", nil},
+	{"verify", "Task 38", "verify the integrity of a prior run", runVerify},
 	{"status", "Task 39", "show recent run history and current state", nil},
 	{"profiles", "Task 40", "list, create, edit, or delete backup profiles", nil},
 	{"help", "Task 41", "show help for the binary or a subcommand", nil},
