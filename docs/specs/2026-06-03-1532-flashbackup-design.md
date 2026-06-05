@@ -227,7 +227,7 @@ PREFLIGHT (T0) → ENUMERATE (T0+) → TRANSFER (T1) → HASH + COMPARE (T2) →
 
 ## Section 4: Move semantics
 
-**Atomic gate.** T3 runs if and only if every file in the enumerated set is `verified` at T2. Any single non-verified file → zero deletions, exit_status `partial`, TUI names the failed files.
+**Atomic gate.** T3 runs if and only if every file in the enumerated set is `verified` at T2. Any single non-verified file → zero deletions, exit_status `copy_only_aborted_delete` (move-mode specific; the enum entry distinguishes this from `partial` which the runner uses for mixed pass/fail in copy mode), TUI names the failed files. (Refined 2026-06-05 per Task 48 review I1.)
 
 **Per-file mutation re-stat at T3.** Even when the atomic gate passes, individual files are checked again before unlink. If `(size, mtime_ns)` differs from the T0 signature, deletion is skipped for that file. Counter `deletions_skipped_due_to_mutation` recorded in run summary.
 
@@ -671,7 +671,7 @@ GIVEN a USB formatted as exFAT, WHEN user runs `flashbackup init`, THEN the tool
 GIVEN a profile pointing at `/Users/me/Documents` (1234 files, 982 MB), WHEN user runs the backup wizard and selects copy mode, THEN every file appears under `<USB>/<hostname>-me/Documents/`, every file's SHA256 matches between source and dest, the manifest records 1234 entries with status=verified, `runs.ndjson` gains two lines (started + finished), and exit code is 0.
 
 **AC-4: Atomic gate blocks deletion.**
-GIVEN move-mode is selected and a fault-injection hook causes 1 of 1234 files to fail hash compare, WHEN T2 completes, THEN T3 is skipped entirely, zero source files are deleted, manifest records 1233 verified + 1 hash_mismatch, runs.ndjson `finished` line has exit_status=`partial`, and exit code is 1.
+GIVEN move-mode is selected and a fault-injection hook causes 1 of 1234 files to fail hash compare, WHEN T2 completes, THEN T3 is skipped entirely, zero source files are deleted, manifest records 1233 verified + 1 hash_mismatch, runs.ndjson `finished` line has exit_status=`copy_only_aborted_delete`, an `atomic_gate_blocked` event is emitted to events.ndjson, no deletion-log.ndjson is created, and exit code is 1. (Refined 2026-06-05 per Task 48 review I1: AC-4 narrative was internally inconsistent with the canonical exit_status enum in section 6; the enum is authoritative.)
 
 **AC-5: Source mutation detected between T0 and T2.**
 GIVEN a source file is modified by an external process between T0+ enumeration and T2 hash, WHEN T2 completes, THEN that file's status is `source_mutated`, exit_status is `partial`, no deletion of that file even in move-mode, and the user sees a clear message naming the file.
