@@ -37,26 +37,40 @@ under the terms of the GNU General Public License v3 as published by the
 Free Software Foundation. This program comes with ABSOLUTELY NO WARRANTY.
 See LICENSE for details.`
 
+// subcommandHandler is the canonical signature for every subcommand
+// implementation. The dispatcher passes ctx (signal-aware), the trailing
+// argv (with the program name and subcommand name dropped), and the three
+// stdio streams. A handler returns the process exit code. stdin is passed
+// to every handler even when the subcommand has no interactive prompts
+// today; the symmetry simplifies the dispatcher and matches the io.Reader
+// / io.Writer pattern used by os/exec.Cmd.
+//
+// This signature was lifted out of an ad-hoc per-arm switch by the Task 35
+// review A2 plan amendment so the dispatcher stays a single table lookup
+// instead of growing one switch arm per subcommand.
+type subcommandHandler func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int
+
 // subcommandList drives both the help screen and the dispatcher. Order is
 // significant: it controls the printed help and the order in which a future
 // shell-completion generator emits names. "help" appears last because it is
 // a meta-command, not a workflow step.
 //
-// Each entry's task pointer documents which task replaces the stub; this
-// lets the operator who runs `flashbackup backup` today and gets a stub
-// reply look up the task number and check whether implementation has
-// shipped. Tasks 35-41 will replace the stub field by field.
+// The handler field is nil when the subcommand has not yet been wired; the
+// dispatcher falls through to dispatchStub which prints the not-implemented
+// notice referencing the named task. Each task lands by setting its handler
+// field; this file is the single place to edit when wiring a new subcommand.
 var subcommandList = []struct {
-	name string
-	task string
-	desc string
+	name    string
+	task    string
+	desc    string
+	handler subcommandHandler
 }{
-	{"init", "Task 35", "initialize a USB volume for FlashBackup"},
-	{"backup", "Task 36 (+ Task 37 move-confirm)", "run a backup using a profile"},
-	{"verify", "Task 38", "verify the integrity of a prior run"},
-	{"status", "Task 39", "show recent run history and current state"},
-	{"profiles", "Task 40", "list, create, edit, or delete backup profiles"},
-	{"help", "Task 41", "show help for the binary or a subcommand"},
+	{"init", "Task 35", "initialize a USB volume for FlashBackup", runInit},
+	{"backup", "Task 36 (+ Task 37 move-confirm)", "run a backup using a profile", runBackup},
+	{"verify", "Task 38", "verify the integrity of a prior run", nil},
+	{"status", "Task 39", "show recent run history and current state", nil},
+	{"profiles", "Task 40", "list, create, edit, or delete backup profiles", nil},
+	{"help", "Task 41", "show help for the binary or a subcommand", nil},
 }
 
 // main is a thin wrapper over run() that wires the real os.Args, stdout,
@@ -101,21 +115,14 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 		if sc.name != arg {
 			continue
 		}
-		switch sc.name {
-		case "init":
-			// Task 35: real implementation. argv[2:] drops the program
-			// name and the subcommand so runInit sees only its own
-			// positional path + flags.
-			return runInit(ctx, argv[2:], stdout, stderr)
-		case "backup":
-			// Task 36 + Task 37: real implementation. argv[2:] is
-			// <profile-name> <USB-path> [--move]. With --move, runBackup
-			// reads a single line from stdin and requires an exact
-			// "DELETE" match before invoking runner.Run with ModeMove.
-			return runBackup(ctx, argv[2:], stdout, stderr, stdin)
-		default:
-			return dispatchStub(ctx, sc.name, sc.task, stderr)
+		// argv[2:] drops the program name and subcommand so each handler
+		// sees only its own positional args + flags. A nil handler means
+		// the task has not landed yet; the stub prints a "not implemented"
+		// notice naming the task number.
+		if sc.handler != nil {
+			return sc.handler(ctx, argv[2:], stdin, stdout, stderr)
 		}
+		return dispatchStub(ctx, sc.name, sc.task, stderr)
 	}
 
 	fmt.Fprintf(stderr, "flashbackup: unknown subcommand %q\n\n", arg)

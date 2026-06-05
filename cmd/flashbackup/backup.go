@@ -56,7 +56,7 @@ const (
 // phase boundary (the cmd-level ctx is the outer layer, the runner's is the
 // inner one; the runner's inner cancel is released via defer regardless of
 // return path).
-func runBackup(ctx context.Context, argv []string, stdout, stderr io.Writer, stdin io.Reader) int {
+func runBackup(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Local FlagSet so we don't pollute flag.CommandLine. ContinueOnError so
 	// a bad flag prints our usage block on stderr rather than calling os.Exit
 	// inside the flag package (which would bypass cmd-level cleanup).

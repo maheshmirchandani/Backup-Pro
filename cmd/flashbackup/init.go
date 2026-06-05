@@ -65,11 +65,19 @@ const initExitCodeUsage = 2
 // a flag, NOT the subcommand name). stdout receives success output;
 // stderr receives errors and the refusal message.
 //
+// stdin is accepted but unused by init today (no interactive prompts);
+// the signature matches the subcommandHandler shape so the dispatcher
+// can call every handler with identical arguments. A future init mode
+// that needed confirmation (e.g. "this USB has data, overwrite? type
+// YES") could consume stdin without a signature change.
+//
 // The context is the signal-aware ctx from main; init itself is short
 // (statfs + a small file write + rsync extract) but each step honours
 // ctx.Err() through its own internal checks (e.g. rsync.EnsureExtracted
 // re-checks ctx during the SHA256 stream).
-func runInit(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
+func runInit(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	_ = stdin // accepted for handler-signature symmetry; init has no prompts today
+
 	// Local FlagSet so we don't pollute the global flag.CommandLine.
 	// ContinueOnError lets us print our own usage on a flag error instead
 	// of the default os.Exit(2) inside the flag package.

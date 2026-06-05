@@ -370,7 +370,7 @@ func TestInit_RealAPFS_RunInitDirect(t *testing.T) {
 	dest := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	code := runInit(context.Background(), []string{dest}, &stdout, &stderr)
+	code := runInit(context.Background(), []string{dest}, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runInit: got %d, want 0\nstderr=%s", code, stderr.String())
 	}
@@ -398,12 +398,12 @@ func TestInit_RealAPFS_RefusesWithoutResetKeys(t *testing.T) {
 	dest := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	if code := runInit(context.Background(), []string{dest}, &stdout, &stderr); code != 0 {
+	if code := runInit(context.Background(), []string{dest}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("first runInit: got %d, want 0\nstderr=%s", code, stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	code := runInit(context.Background(), []string{dest}, &stdout, &stderr)
+	code := runInit(context.Background(), []string{dest}, nil, &stdout, &stderr)
 	if code != initExitCodeUsage {
 		t.Fatalf("second runInit: got %d, want %d\nstderr=%s",
 			code, initExitCodeUsage, stderr.String())
@@ -430,7 +430,7 @@ func TestInit_RealAPFS_ResetKeysRotates(t *testing.T) {
 	dest := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	if code := runInit(context.Background(), []string{dest}, &stdout, &stderr); code != 0 {
+	if code := runInit(context.Background(), []string{dest}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("first runInit: got %d, want 0\nstderr=%s", code, stderr.String())
 	}
 	versionPath := filepath.Join(dest, ".flashbackup", "version.json")
@@ -438,7 +438,7 @@ func TestInit_RealAPFS_ResetKeysRotates(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runInit(context.Background(), []string{"--reset-keys", dest}, &stdout, &stderr); code != 0 {
+	if code := runInit(context.Background(), []string{"--reset-keys", dest}, nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("reset-keys runInit: got %d, want 0\nstderr=%s", code, stderr.String())
 	}
 	rotatedKey := readHMACKey(t, versionPath)
