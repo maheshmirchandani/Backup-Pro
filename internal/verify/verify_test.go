@@ -421,6 +421,120 @@ func TestClassifyExitStatus(t *testing.T) {
 	}
 }
 
+// TestWriteResultsNDJSON_RoundTrip locks the per-file results.ndjson
+// schema added per Task 32 review (2026-06-05): writes a mixed-status
+// PerFile slice (verified + hash_mismatch + missing + unreadable),
+// reads back NDJSON line-by-line, asserts every field round-trips
+// including expected vs actual sha256, expected vs actual size, and
+// the error string for the unreadable entry.
+func TestWriteResultsNDJSON_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	perFile := []rehash.FileResult{
+		{
+			Entry:        sampleManifestEntry("a.txt", 100, "aaaa"),
+			Status:       rehash.StatusVerified,
+			ActualSize:   100,
+			ActualSHA256: "aaaa",
+		},
+		{
+			Entry:        sampleManifestEntry("b.txt", 200, "bbbb"),
+			Status:       rehash.StatusHashMismatch,
+			ActualSize:   200,
+			ActualSHA256: "ffff",
+		},
+		{
+			Entry:      sampleManifestEntry("c.txt", 300, "cccc"),
+			Status:     rehash.StatusMissing,
+			ActualSize: -1,
+		},
+		{
+			Entry:      sampleManifestEntry("d.txt", 400, "dddd"),
+			Status:     rehash.StatusUnreadable,
+			ActualSize: -1,
+			Err:        errors.New("permission denied"),
+		},
+	}
+	if err := writeResultsNDJSON(dir, perFile); err != nil {
+		t.Fatalf("writeResultsNDJSON: %v", err)
+	}
+
+	resultsPath := filepath.Join(dir, "results.ndjson")
+	data, err := os.ReadFile(resultsPath)
+	if err != nil {
+		t.Fatalf("read results: %v", err)
+	}
+	lines := bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n"))
+	if len(lines) != len(perFile) {
+		t.Fatalf("lines: got %d want %d", len(lines), len(perFile))
+	}
+
+	var got [4]resultsRecord
+	for i, line := range lines {
+		if err := json.Unmarshal(line, &got[i]); err != nil {
+			t.Fatalf("unmarshal line %d: %v", i, err)
+		}
+	}
+
+	// Verified: actual matches expected; no error.
+	if got[0].Path != "a.txt" || got[0].Status != "verified" ||
+		got[0].Sha256Expected != "aaaa" || got[0].Sha256Actual != "aaaa" ||
+		got[0].SizeExpected != 100 || got[0].SizeActual != 100 || got[0].Err != "" {
+		t.Errorf("verified record drift: %+v", got[0])
+	}
+	// Hash mismatch: actual sha differs from expected.
+	if got[1].Path != "b.txt" || got[1].Status != "hash_mismatch" ||
+		got[1].Sha256Expected != "bbbb" || got[1].Sha256Actual != "ffff" {
+		t.Errorf("hash_mismatch record drift: %+v", got[1])
+	}
+	// Missing: ActualSize -1 stays as -1 (NOT omitted by omitempty; omitempty
+	// drops zero but -1 is a sentinel and should survive).
+	if got[2].Path != "c.txt" || got[2].Status != "missing" || got[2].SizeActual != -1 {
+		t.Errorf("missing record drift: %+v", got[2])
+	}
+	// Unreadable: error string round-trips.
+	if got[3].Path != "d.txt" || got[3].Status != "unreadable" ||
+		got[3].Err != "permission denied" {
+		t.Errorf("unreadable record drift: %+v", got[3])
+	}
+
+	// File mode 0o644 (no secrets; support tooling readable).
+	stat, err := os.Stat(resultsPath)
+	if err != nil {
+		t.Fatalf("stat results: %v", err)
+	}
+	if got := stat.Mode().Perm(); got != 0o644 {
+		t.Errorf("mode: got %o want 0o644", got)
+	}
+}
+
+// TestWriteResultsNDJSON_EmptyPerFile asserts that an empty PerFile slice
+// produces an empty file (zero entries verified is a valid outcome for an
+// empty profile / empty manifest).
+func TestWriteResultsNDJSON_EmptyPerFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeResultsNDJSON(dir, nil); err != nil {
+		t.Fatalf("writeResultsNDJSON(nil): %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "results.ndjson"))
+	if err != nil {
+		t.Fatalf("read results: %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("results.ndjson should be empty, got %d bytes: %q", len(data), data)
+	}
+}
+
+func sampleManifestEntry(path string, size int64, sha string) state.ManifestEntry {
+	return state.ManifestEntry{
+		V:            1,
+		Path:         path,
+		Size:         size,
+		MtimeNS:      1700000000000000000,
+		SHA256Source: sha,
+		Status:       state.StatusVerified,
+	}
+}
+
 func TestWriteSummary_RoundTrip(t *testing.T) {
 	// Round-trip: write a known VerifyResult; gunzip the file; parse it
 	// back; assert every field survived. Guards the on-disk schema lock.

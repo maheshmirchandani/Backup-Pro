@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -22,14 +23,22 @@ import (
 	"github.com/maheshmirchandani/Backup-Pro/internal/verify/rehash"
 )
 
+// ExitStatusOK and ExitStatusPreflightFailed are re-exported from
+// runner/types so verify and runner share one source of truth for these
+// wire strings. ExitStatusIntegrityFailed is verify-specific (the runner
+// has no "integrity_failed" exit; that classification only arises after
+// re-hashing the persisted manifest). Per Task 32 review (2026-06-05).
+const (
+	ExitStatusOK              = types.ExitStatusOK
+	ExitStatusPreflightFailed = types.ExitStatusPreflightFailed
+)
+
 // ExitStatus wire strings persisted in summary.json and returned on
 // VerifyResult.ExitStatus. Kept as untyped constants (matching the runner
 // ExitStatus* convention) so call sites can compare against named values
 // rather than inlining string literals.
 const (
-	ExitStatusOK              = "ok"
 	ExitStatusIntegrityFailed = "integrity_failed"
-	ExitStatusPreflightFailed = "preflight_failed"
 )
 
 // allRunIDSentinel is the VerifyResult.RunID returned when All=true.
@@ -397,14 +406,24 @@ func verifyOneRun(ctx context.Context, in oneRunInputs) (*VerifyResult, error) {
 		ExitStatus:           classifyExitStatus(rehashResult, loadResult),
 	}
 
-	// 5. Write summary.json. Pipeline error here is FATAL for the run:
-	// the verify produced numbers but cannot land them on disk, so the
-	// `flashbackup status` "last_verify" lookup will not find them.
-	// Returning an error here intentionally degrades the aggregate path
-	// (the All-mode loop will treat this run as integrity_failed) so
-	// the operator notices.
+	// 5. Write per-file results.ndjson and aggregate summary.json. Both
+	// must land before we surface the deferred rehash cancellation error
+	// so the operator has the full per-file forensic trail when the
+	// verify is partial (per design spec section 5). A pipeline error on
+	// either is FATAL for the run: the verify produced numbers but cannot
+	// land them on disk, so the `flashbackup status` "last_verify" lookup
+	// will not find them. Returning an error here intentionally degrades
+	// the aggregate path (the All-mode loop will treat this run as
+	// integrity_failed) so the operator notices.
 	verifyID := newVerifyID(time.Now().UTC())
-	if writeErr := writeSummary(in.dotDir, in.runID, verifyID, runResult); writeErr != nil {
+	verifyDir := filepath.Join(in.dotDir, "runs", in.runID, "verifications", verifyID)
+	if err := os.MkdirAll(verifyDir, 0o700); err != nil {
+		return runResult, fmt.Errorf("mkdir verify dir: %w", err)
+	}
+	if writeErr := writeResultsNDJSON(verifyDir, rehashResult.PerFile); writeErr != nil {
+		return runResult, fmt.Errorf("write results: %w", writeErr)
+	}
+	if writeErr := writeSummaryFile(verifyDir, in.runID, verifyID, runResult); writeErr != nil {
 		return runResult, fmt.Errorf("write summary: %w", writeErr)
 	}
 
@@ -574,11 +593,22 @@ var readRand = rand.Read
 // no partial files on disk). File mode 0o644 (no secrets; reachable by
 // support tooling without sudo, matching the deletion-log convention from
 // design spec section 4).
+// writeSummary keeps its old signature for the existing TestWriteSummary_RoundTrip
+// and any external callers; routes through writeSummaryFile after computing
+// the verify dir.
 func writeSummary(dotDir, runID, verifyID string, r *VerifyResult) error {
 	verifyDir := filepath.Join(dotDir, "runs", runID, "verifications", verifyID)
 	if err := os.MkdirAll(verifyDir, 0o700); err != nil {
 		return fmt.Errorf("mkdir verify dir: %w", err)
 	}
+	return writeSummaryFile(verifyDir, runID, verifyID, r)
+}
+
+// writeSummaryFile writes the aggregate summary.json inside an already-created
+// verifyDir. Split from writeSummary so verifyOneRun can do mkdir once and
+// then call both writeResultsNDJSON and writeSummaryFile against the same dir
+// without re-mkdir'ing.
+func writeSummaryFile(verifyDir, runID, verifyID string, r *VerifyResult) error {
 	rec := summaryRecord{
 		V:                    summarySchemaVersion,
 		VerifyID:             verifyID,
@@ -603,6 +633,65 @@ func writeSummary(dotDir, runID, verifyID string, r *VerifyResult) error {
 	summaryPath := filepath.Join(verifyDir, summaryFilename)
 	if err := state.WriteTmpThenRename(summaryPath, data, 0o644); err != nil {
 		return fmt.Errorf("write summary file: %w", err)
+	}
+	return nil
+}
+
+// resultsRecord is one line in results.ndjson: the per-file forensic record
+// for one entry that was re-hashed. Schema version v=1.
+//
+// Fields chosen to answer the operator question "which files failed and how"
+// without re-reading the manifest. Sha256Expected and SizeExpected come from
+// the original ManifestEntry; Sha256Actual and SizeActual come from rehash.
+// Status mirrors the rehash.Status wire string. Err is the wrapped error
+// string when StatusUnreadable; absent otherwise.
+//
+// Per design spec section 5 the per-file record is the support-bundle's
+// answer to "which N files in this verify reported hash_mismatch".
+type resultsRecord struct {
+	V              int    `json:"v"`
+	Path           string `json:"path"`
+	Status         string `json:"status"`
+	SizeExpected   int64  `json:"size_expected"`
+	SizeActual     int64  `json:"size_actual,omitempty"`
+	Sha256Expected string `json:"sha256_expected"`
+	Sha256Actual   string `json:"sha256_actual,omitempty"`
+	Err            string `json:"error,omitempty"`
+}
+
+// writeResultsNDJSON writes one line per FileResult into results.ndjson
+// inside verifyDir. NDJSON (not pretty-printed JSON) so grep + jq + tail
+// work on the file. Mode 0o644 (no secrets; reachable by support tooling
+// without sudo). Uses state.WriteTmpThenRename for atomicity (invariant #4)
+// so a partial write cannot leave a torn results.ndjson on disk.
+//
+// Empty perFile produces an empty file (zero entries verified is a valid
+// outcome for an empty profile / empty manifest).
+func writeResultsNDJSON(verifyDir string, perFile []rehash.FileResult) error {
+	var buf bytes.Buffer
+	for _, fr := range perFile {
+		rec := resultsRecord{
+			V:              1,
+			Path:           fr.Entry.Path,
+			Status:         string(fr.Status),
+			SizeExpected:   fr.Entry.Size,
+			SizeActual:     fr.ActualSize,
+			Sha256Expected: fr.Entry.SHA256Source,
+			Sha256Actual:   fr.ActualSHA256,
+		}
+		if fr.Err != nil {
+			rec.Err = fr.Err.Error()
+		}
+		line, err := json.Marshal(rec)
+		if err != nil {
+			return fmt.Errorf("marshal results line for %q: %w", fr.Entry.Path, err)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	resultsPath := filepath.Join(verifyDir, "results.ndjson")
+	if err := state.WriteTmpThenRename(resultsPath, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write results file: %w", err)
 	}
 	return nil
 }
