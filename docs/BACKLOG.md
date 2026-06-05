@@ -2,45 +2,37 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-04 night session, after Task 31)
+## Project status (2026-06-05, HALTED on GitHub Actions billing block after Task 31)
 
-**Phase:** Plan 1 execution. Tasks 1-31 complete. RUNNER PACKAGE COMPLETE; verify pipeline now has load + rehash. Next: Task 32 (`internal/verify/verify.go` top-level) + Task 31 review in overlap.
+**Phase:** Plan 1 execution. Tasks 1-31 complete in code; commit head `c3f2ca0` (CI split). HALTED on CI: GitHub Actions returned the annotation "The job was not started because recent account payments have failed or your spending limit needs to be increased" on all jobs (Linux AND macOS), starting with the Task 29 review fix commit `06a4255` and persisting through `c3f2ca0`. This is an account-level billing block, not a runner-type quota.
 
-**Repo:** `https://github.com/maheshmirchandani/Backup-Pro`.
+**Resume protocol (next session):**
 
-**Next session begin protocol:**
+1. MM resolves billing at https://github.com/settings/billing (failed payment retry OR raise spending limit).
+2. `gh run rerun 26995126512` (or trigger a fresh CI cycle on `c3f2ca0`). Confirm test-linux + test + e2e-fast + e2e-safety + bench all green.
+3. Apply Task 30 review minor fixes (3 minors logged in Task 30 review verdict: pipeline-order doc note, mid-stream V-mismatch test gap, LoadResult invariant assertion).
+4. Dispatch Task 31 spec+quality review subagent (never dispatched due to CI halt).
+5. Resume the overlap cycle: Task 31 review + Task 32 implementer in parallel.
+6. Continue per `superpowers:subagent-driven-development` with the dispatch protocol below (implementer runs `go vet && gofmt -s -l && go test -race && make coverage` locally before push; combined spec+quality review after each push; minor findings inline).
 
-1. Pull latest; confirm CI green via `gh run list --limit 1`.
-2. **Begin Task 22** (`internal/runner/t0_preflight.go`): preflight orchestration, emit `state.Event{Kind:"phase_started",Phase:"T0"}` via `EventStore.Append`, "started" line via `RunLogStore.AppendStarted`, `Checkpoint()` at phase end. Per the plan API Contracts (now reconciled with Task 20's actual `PreflightContext` shape) and Task 21's runner types.
-3. Continue overlap-CI cycle: Task N+1 implementer dispatched in parallel with Task N review subagent.
+**CI split in place (commit `c3f2ca0`):** `.github/workflows/ci.yml` now has a new `test-linux` job on ubuntu-latest that handles the portable packages (hash, state, profiles, paths, selection, runner/types, verify/*) plus lint and vet. The macOS `test` job is narrowed to the macOS-only packages (drives, preflight subtree, rsync, runner). `bench` moved to ubuntu (pure SHA256 path). `e2e-fast` and `e2e-safety` stay on macos-14 (need hdiutil + APFS mounts). Docs-only commits skip CI via `paths-ignore`. Effective macOS-min burn per push estimated to drop from ~80 to ~50.
 
-**Critical: dispatch protocol amendment (2026-06-04, post-CI-rescue).** Every implementer subagent MUST run `make lint && make coverage` locally before committing. The previous foundation phase's implementers shipped without these, accumulating 10 consecutive red CI runs (Tasks 12-20) that the BACKLOG falsely recorded as green. The coverage gate also had a latent bug where it took only the FIRST subpackage's percentage (alphabetical) and masked under-80% subpackages; this is now fixed in `b17dc22`. Statement-weighted tree totals are the gate going forward.
+**Dispatch protocol amendment (2026-06-04, post-CI-rescue, still in force).** Every implementer subagent MUST run `go vet && gofmt -s -l && go test -race && make coverage` locally before committing. Bare `gofmt -l` accepts list-indent shapes the simplifier (`-s`) rewrites; CI's golangci-lint runs the -s variant, so local must too. Statement-weighted tree totals are the coverage gate.
 
-**Coverage at session end (true tree-weighted, per new gate in `b17dc22`):**
-- runner: vacuously covered (types only)
-- hash: 81.8%
-- state: 83.0%
-- preflight: 83.0%
+**Local test sweep at halt time (verified 2026-06-05):**
+`go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-Old gate falsely reported `preflight` based on `codesign` alone (92%); the lock subpackage at 75.4% was masked. Aggregate tree number is honest at 83.0%.
+**Tasks complete (31/58):**
+1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
+11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
+21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
+23-27. Runner phase functions: T0+ enumerate, T1 transfer, T2 hash+compare, T3 delete-source, T4 finalize
+28. Fault-injection DSL + release stub (commit `6e958fe`)
+29. Top-level runner.Run state machine + faultinject hooks in t2/t3/t4 (commit `da24cd1`; review fixes in `06a4255`)
+30. internal/verify/load manifest reader with inline HMAC verification (commit `14f73e0`)
+31. internal/verify/rehash per-file rehash + classify (commit `838faee`)
 
-**Repo:** `https://github.com/maheshmirchandani/Backup-Pro` (private, GPLv3). Local: `/Users/maheshm/Documents/1-AI-Projects/Utilities/Backup-Mac/`.
-
-**Latest CI green:** confirmed after fix for gosec G306 (commit `f0cf05c`). Per-package coverage real: hash 84.6%, state 83.0%, profiles 81.9%, drives 85.3% (all above 80% gate).
-
-**Tasks complete (30/58):**
-1. Bootstrap (manual): git init, GPLv3, conventions, GitHub Releases-ready
-2. Makefile + golangci-lint + CI workflow (+ 4 code-review fixes + 4 Makefile-guard fixes + coverage-gate correctness fix + gosec G306 test-fixture fix)
-3. `internal/paths` namespace prefix (3 tests)
-4. `internal/hash` streaming SHA256 with sync.Pool + ctx (4 tests + property test + benchmark 2.35 GB/s)
-5. `internal/state` event store (NDJSON + Checkpoint API, 9 tests + 21 subtests)
-6. `internal/state` manifest store + length-prefixed HMAC + stream-gzip (7 tests + property + pipe-separator forgery test)
-7. `internal/state` run log store (two-line model + torn-write recovery, 13 tests + 6 subtests)
-8. `internal/state` version.json (FAIL-CLOSED on corruption, 12 tests)
-9. `internal/profiles` Store + strict glob allowlist (14 tests + 9 subtests)
-10. `internal/drives` macOS volume enumeration via diskutil (5 tests)
-
-**Tasks remaining (48):** 11 (selection), 12 (rsync extract + hardening), 12a (build-rsync.sh), 13 (rsync wrapper), 14 (rsync progress parser), 15 (preflight/lock), 16 (preflight/filesystem), 17 (preflight/symlink), 18 (preflight/codesign), 19 (preflight/volume_uuid), 20 (preflight integrate), 21-29 runner state machine, 30-32 verify, 33 plain renderer, 34-41 CLI subcommands, 42 e2e helpers, 42a fixtures, 43-51 e2e tests, 51a AC-19 tamper test, 51b missing fault hooks, 52 delete confirm, 53 ERROR_CATALOG, 54 README, 55 dogfood tag.
+**Tasks remaining (27):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 32 (verify top-level), 33 (plain renderer), 34-41 (cmd/flashbackup CLI subcommands), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
