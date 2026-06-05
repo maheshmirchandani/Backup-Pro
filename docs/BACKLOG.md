@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 38-39 + Task 38 review I1 fix)
+## Project status (2026-06-05, after Tasks 39 + 40 + Task 39 review I1+I2)
 
-**Phase:** Plan 1 execution. Tasks 1-39 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with pre-T0 DELETE confirmation) + verify (with --all / --check-extras / explicit run-id) + status (with --json schema). `internal/testutil` houses shared hdiutil helpers. Dispatcher uses `subcommandList[].handler` field. Next: Task 39 review + Task 40 implementer (profiles subcommand: list/new/edit/delete/validate).
+**Phase:** Plan 1 execution. Tasks 1-40 complete. Repo public. CI green (pending the Task 40 rerun after the transient Go-module-tar collision; em-dash fix CI just kicked off). `cmd/flashbackup` covers init + backup (copy + move) + verify + status + profiles (CRUD with $EDITOR). `internal/testutil` houses shared hdiutil helpers. Dispatcher uses `subcommandList[].handler` field. Next: Task 40 review + Task 41 implementer (help subcommand: constants-table for help text per Tech Writer hat).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (39/58):**
+**Tasks complete (40/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -35,9 +35,10 @@
 36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control; review verdict approve)
 37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8; review fixes amended spec section 4 + AC-7 + AC-8 + ExitStatusCopyOnlyAbortedDelete to reflect the pre-T0 gate architecture instead of the originally-specced post-T2 modal; M2 SIGINT comment tightened; M4 `deleteToken` const replaces dead `ev.Path` marker)
 38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 14 tests; cmd/flashbackup coverage 87.1%; review verdict approve with one important I1: renderer summary "details: see" line was wrong for verify — fixed by switching UIEvent.Path semantics from "run dir" to "exact artifact file path" so each producer names its own artifact)
-39. cmd/flashbackup status subcommand with --json (commit `4f69943`; locked JSON schema per API Contracts; tabular plain text default; last_run from runs.ndjson scan; last_verify from scan-and-pick-newest by VerifiedAt; lock status via stat; 26 tests; cmd/flashbackup coverage 73.6%)
+39. cmd/flashbackup status subcommand with --json (commit `4f69943`; locked JSON schema per API Contracts; tabular plain text default; last_run from runs.ndjson scan; last_verify from scan-and-pick-newest by VerifiedAt; lock status via stat; 26 tests; cmd/flashbackup coverage 73.6%; review fixes: scrubbed 4 em-dash violations in status_helpers.go + status_test.go; plan amendment locks `last_run.profile` as omitempty)
+40. cmd/flashbackup profiles subcommand (commit `9773705`; CRUD wrapper around internal/profiles.Store: list / new / edit / delete / validate; new + edit open $EDITOR or vim fallback on a temp JSON file; editorRunOverrideForTest seam for callback-based tests; 24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%)
 
-**Tasks remaining (19):** 22a + 29a (queued earlier), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (18):** 22a + 29a (queued earlier), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -81,6 +82,38 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Tasks 39 review fixes + Task 40 (profiles) + transient CI
+
+Task 39 review verdict: minor-fixes-needed. Two important findings:
+- I1: four em-dash (U+2014) violations in `status_helpers.go` (lines 80, 128, 131) and `status_test.go` (line 228). CLAUDE.md em-dash discipline is hard; replaced each with semicolon + continuation per the project substitution table.
+- I2: API Contracts schema example showed `last_run.profile` as populated without an "optional" annotation, but `state.FinishedRun.Profile` already uses `omitempty` so a backup without a named profile drops the field. Plan amendment locks the optionality (drops `last_run`/`last_verify` entirely when absent; drops `last_run.profile` when no named profile).
+
+Other Task 39 minors deferred: M1 (status.go 321 lines and status_helpers.go 374 lines; ~50% is doc-comment); M3+M4 (runIDPattern + retention_limit triplication; tracked as backlog amendments A2+A3); M5 (verify summaryRecord shape duplication intentional one-way contract); M6 (lock_status semantic for stale locks out of locked-schema scope).
+
+Task 40 (`cmd/flashbackup/profiles.go` + `profiles_helpers.go`) shipped commit `9773705`. CRUD wrapper around `internal/profiles.Store`:
+- `list <USB> [--json]`: tabular plain text or JSON array.
+- `new <name> <USB>`: opens $EDITOR (vim fallback) on a temp JSON skeleton; on save, parse + validate + Upsert. Refuses to overwrite existing profile (exit 2).
+- `edit <name> <USB>`: opens $EDITOR on the existing profile JSON; rejects rename attempts.
+- `delete <name> <USB>`: Store.Delete; clear "not found" if name unknown.
+- `validate <name> <USB>`: profile.Validate(); OK or per-line errors + exit 1.
+
+Editor seam: `editorRunOverrideForTest var func(path string) error` lets tests inject a Go callback that mutates the temp file in-process; tests register `t.Cleanup` to reset. The real `runEditorSubprocess` execs via `exec.CommandContext` wired to `os.Stdin/Stdout/Stderr`, supports space-separated EDITOR values like `code --wait`.
+
+Design decisions worth recording:
+- `list` uses a hand-rolled pre-scan for `--json` instead of `flag.FlagSet` so the documented `list <USB-path> [--json]` shape works with the flag in either position (stdlib flag stops at first positional).
+- `validate` is the only path that surfaces exit 1 (on-disk tampering after Upsert validated cleanly); name collisions / rename attempts / post-editor validation failures all exit 2 (operator-fixable).
+- `delete`-not-found is exit 2 (likely a name typo).
+- Unit tests use `t.TempDir()` as a stand-in for a USB mountpoint (profiles operations don't touch rsync or immutable bits, so the DMG dance is unnecessary). Only one e2e test mounts a real APFS DMG.
+- The brief's `**/*` skeleton was changed to `*` + `.DS_Store` because Store's allowlist forbids `**` (would behave differently between Go's walker and rsync). Skeleton is a starting point; doc'd inline.
+
+Transient CI failure on Task 40 push (`27001541408`): Go module cache restore `tar` collision (`rapid@v1.3.0/...: Cannot open: File exists` on multiple files). Not a code issue. Rerunning after the em-dash fix push.
+
+24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%. Files: profiles.go (516 lines), profiles_helpers.go (59 lines), profiles_test.go (670 lines). All pre-commit gates green locally.
+
+Punted: no `rename` action (out of scope; would need delete+recreate semantics).
+
+Commits this segment: `9773705` (Task 40 profiles), `292fbb7` (Task 39 review I1+I2 + BACKLOG).
 
 ### 2026-06-05 (latest): Tasks 38 review + Task 39 (status) + UIEvent.Path artifact-path refinement
 
