@@ -1,0 +1,70 @@
+Fixture: pathological
+Purpose: edge-case source tree exercising filename character classes,
+filesystem-state-only attributes (immutable, sparse), and path-length
+limits. Backed by mkfixtures.sh because the members cannot survive a
+plain git checkout.
+File count: 8 (after mkfixtures.sh runs)
+Total bytes: ~1,048,648 (mostly sparse.bin's 1 MiB logical size; ~50
+                          bytes physical because the body is a hole)
+SHA256-of-tree: d902015f4aad3e21f830a4461ad8ac29eea7bb498baea672d9eb973412ad93a3
+
+SHA256-of-tree recipe: see test/fixtures/tiny/MANIFEST.txt; the recipe
+is the same and the Go-side helper is shared. The recipe walks logical
+file contents, so sparse.bin's hash reflects 1 MiB of zero bytes plus
+the trailing "tail\n" suffix.
+
+File inventory (after mkfixtures.sh runs):
+
+  bell\x07char.txt              0 bytes   ASCII BEL (0x07) in filename
+  esc\x1bchar.txt               0 bytes   ASCII ESC (0x1b) in filename
+  naïve-nfc.txt                 9 bytes   Unicode NFC composed form
+  naïve-nfd.txt                 9 bytes   Unicode NFD decomposed form
+                                          (paired with naïve-nfc above)
+  plain.txt                    14 bytes   ordinary content control file
+  immutable-target.txt         17 bytes   test sets chflags uchg before
+                                          backup run; cleanup clears it
+  deeply/.../file.txt          18 bytes   total path > 200 bytes
+  sparse.bin           ~1,048,581 bytes   1 MiB logical, mostly a hole
+
+Edge cases exercised:
+
+  * NFC vs NFD twin: APFS treats them as distinct entries; HFS+ would
+    collapse them. Tests detect whether the runner copies both or only
+    one (the answer must be: both, because the runner is path-byte
+    transparent and does not normalize).
+  * Control bytes in filenames: tests that the runner does not
+    inadvertently escape, mangle, or refuse these paths during
+    manifest serialization or path comparison.
+  * Long path (~200 bytes): exercises the PATH_MAX defense in the
+    fixture, the path-buffer allocator, and the manifest's path
+    column width.
+  * Immutable file: validates the runner's behaviour when rsync can
+    read but the source file cannot be unlinked in --move mode (test
+    will chflags uchg before the run, restore in cleanup).
+  * Sparse file: validates that rsync's sparse-handling flag (or its
+    absence) is observable in the dest file size.
+
+Materialization:
+
+  Run test/fixtures/pathological/mkfixtures.sh <dest-dir> to populate.
+  The script is invoked from test/e2e/helpers.go's SeedSource when the
+  fixture name is "pathological". Idempotent; a second run overwrites.
+
+ACs that consume this fixture:
+  AC-3   happy-path copy (with hostile filenames)
+  AC-5   source mutation detected between T0 and T2 (sparse / immutable
+         interactions)
+  AC-9   verify intact backup (NFC/NFD twin survival)
+  AC-18  path sanitization defeats escape-sequence injection
+         (control bytes in filenames must not corrupt the TTY when
+         rendered)
+
+Stability:
+  - mkfixtures.sh is committed; its output is deterministic.
+  - SHA256-of-tree was computed from a freshly-materialized tree on
+    macOS APFS; re-run test/fixtures/regen-manifest.sh after any edit
+    to mkfixtures.sh and update this line.
+  - On non-APFS / non-darwin hosts the script may behave differently
+    (Linux ext4 accepts the control-byte names too; HFS+ collapses
+    the NFC/NFD twins). The fixture is macOS-APFS-first; tests must
+    skip on incompatible hosts via testutil.RequireMacOS.

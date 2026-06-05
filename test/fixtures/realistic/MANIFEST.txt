@@ -1,0 +1,42 @@
+Fixture: realistic
+Purpose: small but representative source tree with multiple subdirectories
+and content types. Used for tests that need more than one directory or
+that exercise the runner's per-subtree walking.
+File count: 9
+Total bytes: 950 (sum of stat -f %z; approximate; not used for
+                  invariant assertions, only documentation)
+SHA256-of-tree: bb8fe4743cabbc2e652b565800346703c76241adffc4e5b7ec0aa5d579038863
+
+SHA256-of-tree recipe: see test/fixtures/tiny/MANIFEST.txt; the recipe
+is the same and the Go-side helper is shared.
+
+File inventory:
+
+  code/main.txt          101 bytes   placeholder Go-style main
+  code/util.txt          133 bytes   placeholder Go-style util
+  code/util_test.txt     159 bytes   placeholder Go-style test
+  docs/notes.md          135 bytes   markdown placeholder
+  docs/quarterly.md      152 bytes   markdown placeholder
+  docs/changelog.txt      90 bytes   plain-text placeholder
+  photos/img-001.jpg      60 bytes   JFIF-shaped byte string
+  photos/img-002.jpg      60 bytes   JFIF-shaped byte string
+  photos/img-003.jpg      60 bytes   JFIF-shaped byte string
+
+Note: code/*.txt files use the .txt extension (not .go) so that
+`go test ./...` and `go vet ./...` ignore them. The backup runner
+treats them as opaque bytes, so the extension is irrelevant to the
+behaviour under test.
+
+ACs that consume this fixture:
+  AC-3  happy-path copy (multi-directory source variant)
+  AC-9  verify intact backup (multi-directory source)
+  AC-14 --delete protects user-added files (more dest paths to
+        scan for accidental deletes)
+  AC-18 path sanitization (path traversal payloads land in a
+        multi-subdir tree, not a flat one)
+
+Stability:
+  - Files committed to git in static form.
+  - SHA256-of-tree must remain stable across machines; do not edit
+    these files without re-running test/fixtures/regen-manifest.sh
+    and updating this line.

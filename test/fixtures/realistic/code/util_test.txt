@@ -1,0 +1,9 @@
+package main
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if got, want := Add(2, 3), 5; got != want {
+		t.Errorf("Add(2,3) = %d; want %d", got, want)
+	}
+}

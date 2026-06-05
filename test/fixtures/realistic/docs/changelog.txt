@@ -1,0 +1,2 @@
+2026-06-05 initial fixture creation
+2026-06-05 added second line for byte-count variation

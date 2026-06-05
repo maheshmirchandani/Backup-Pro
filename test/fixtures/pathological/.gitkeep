@@ -1,0 +1,15 @@
+Pathological fixture members are NOT committed in static form. They are
+materialized at test setup time by test/fixtures/pathological/mkfixtures.sh
+(invoked from the e2e SeedSource helper) so that:
+
+  * NFC vs NFD twin filenames survive (some filesystems / git checkouts
+    silently normalize one form to the other).
+  * Control bytes 0x07 (BEL) and 0x1B (ESC) in filenames are preserved
+    (a Windows checkout would refuse them; many editors mangle them).
+  * Sparse files retain their sparse-ness (git stores them as fully
+    expanded blobs; the sparseness would be lost on checkout).
+  * Immutable files (chflags uchg) are settable only at materialization
+    time on a real APFS / HFS+ mount; the bit is filesystem state, not
+    file content.
+
+See MANIFEST.txt in this directory for the full inventory.

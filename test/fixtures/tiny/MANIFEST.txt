@@ -1,0 +1,38 @@
+Fixture: tiny
+Purpose: smallest viable backup; happy-path e2e exercise.
+File count: 3
+Total bytes: 20
+SHA256-of-tree: 44511b29c1650c20d661ffabd97517b18ce2b35da630e9ee76e5eb76b1a11d19
+
+SHA256-of-tree recipe (must match the Go implementation in
+test/e2e/helpers.go and the shell version in regen-manifest.sh):
+
+  1. List every regular file under the fixture dir, relative paths.
+  2. Sort the list lexicographically by raw bytes (LC_ALL=C).
+  3. For each path: write the bytes of the relative path, one newline
+     (0x0a), the file contents, one newline (0x0a), into a hash buffer.
+  4. SHA-256 the buffer. Hex-encode.
+
+The framing newline after each chunk prevents the concat-collision
+attack where files A="x" + B="y" and A="xy" + B="" would share a hash.
+
+File inventory:
+
+  a.txt      4 bytes   "aaa\n"
+  b.md       6 bytes   "hello\n"
+  c.json    10 bytes   '{"k":"v"}\n'
+
+ACs that consume this fixture:
+  AC-1  init APFS happy path  (used as the source tree under the
+                               init test's backup)
+  AC-3  happy-path copy
+  AC-9  verify intact backup
+  AC-11 concurrency lock (second instance refused)
+  AC-15 non-TTY fallback (small enough that backup completes
+        before the test's deadline regardless of the rsync flavour)
+
+Stability:
+  - Files committed to git in static form.
+  - SHA256-of-tree must remain stable across machines; do not edit
+    these files without re-running test/fixtures/regen-manifest.sh
+    and updating this line.
