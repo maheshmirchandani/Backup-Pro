@@ -118,6 +118,11 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return result, emitPreflightFailedSummary(ctx, opts.UIRenderer, result, fmt.Errorf("runner Run: mkdir run dir: %w", err))
 	}
+	// RunDir is the on-disk absolute path of <DotDir>/runs/<RunID>. Carried
+	// on RunResult so the renderer's UIEvtSummary can substitute it into
+	// the "where" line of the summary block (design spec section 6 full-
+	// path principle; Task 33 review M1).
+	result.RunDir = runDir
 
 	// 4. Open audit + run-log stores. Closed via defer regardless of return
 	// path. Manifest store opens after T0 (HMAC key arrives in pc.VersionFile).
@@ -382,6 +387,7 @@ func emitSummary(ctx context.Context, r types.Renderer, res *types.RunResult) {
 	}
 	_ = r.OnEvent(ctx, types.UIEvent{
 		Kind:      types.UIEvtSummary,
+		Path:      res.RunDir,
 		Status:    res.ExitStatus,
 		Timestamp: res.FinishedAt,
 	})

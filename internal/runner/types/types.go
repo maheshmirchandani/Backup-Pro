@@ -98,6 +98,12 @@ const (
 // (rsync.log from T1, deletion-log.ndjson from T3) gathered for the
 // support-bundle generator. Empty paths are excluded by the runner; the
 // slice can be nil for a copy-mode run that never produces a deletion log.
+//
+// RunDir is the absolute on-disk path of the per-run directory
+// (`<DotDir>/runs/<RunID>`). Populated once T0 succeeds (the dir does
+// not exist before then). Carried through to UIEvtSummary so the
+// renderer can render a full path in the "where" line of the summary
+// block per design spec section 6. Empty when T0 failed.
 type RunResult struct {
 	RunID                         string
 	StartedAt, FinishedAt         time.Time
@@ -107,6 +113,7 @@ type RunResult struct {
 	DeletionsSkippedDueToMutation int
 	ExitStatus                    string
 	SupportPaths                  []string
+	RunDir                        string
 }
 
 // UIEventKind identifies the shape of a UIEvent. The wire strings are stable
@@ -114,6 +121,13 @@ type RunResult struct {
 // runner mirrors UI events to disk. PS4 from the plan strategic decisions:
 // UIEvent is renderer-facing and distinct from state.Event (persisted).
 type UIEventKind string
+
+// UIEvtSummary additionally carries the run directory in UIEvent.Path so
+// the renderer can substitute the real path into the "where" line of the
+// three-part summary block (design spec section 6, principle #2: full
+// paths, not relative). Empty Path means the run never got past T0 and
+// the run dir does not exist; renderers should fall back to the
+// placeholder string in that case. Added 2026-06-05 per Task 33 review.
 
 const (
 	UIEvtPhaseStarted   UIEventKind = "phase_started"

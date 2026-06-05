@@ -309,7 +309,10 @@ type ProgressInfo struct {
 // lives in runner/types above. NewPlainRenderer returns a value satisfying
 // runner.Renderer for terminal output.
 
-func NewPlainRenderer(out io.Writer, isTTY bool) runner.Renderer
+// The return type is `types.Renderer` (interface in internal/runner/types);
+// the `runner.` prefix above is shorthand for readability. Code uses the
+// types-package import. Task 33 review clarification, 2026-06-05.
+func NewPlainRenderer(out io.Writer, isTTY bool) types.Renderer
 
 // internal/verify (Tasks 30-32)
 

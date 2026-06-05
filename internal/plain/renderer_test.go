@@ -195,6 +195,22 @@ func TestOnEvent_NonTTY_AllKinds(t *testing.T) {
 				"  finished at: 2026-06-05T14:30:00Z\n" +
 				"  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n",
 		},
+		{
+			// Task 33 review M1: when UIEvent.Path carries the real run dir,
+			// the "where" line must substitute it instead of rendering the
+			// literal placeholder. Spec section 6 principle #2.
+			name: "summary with real run dir path",
+			ev: types.UIEvent{
+				Kind:      types.UIEvtSummary,
+				Path:      "/Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2",
+				Status:    "ok",
+				Timestamp: fixedTime,
+			},
+			want: "\nRun complete.\n" +
+				"  exit status: ok\n" +
+				"  finished at: 2026-06-05T14:30:00Z\n" +
+				"  details: see /Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2/events.ndjson\n",
+		},
 	}
 
 	for _, tc := range cases {

@@ -268,12 +268,21 @@ func (r *plainRenderer) writeSummary(ev types.UIEvent) error {
 	// Single fmt.Fprintf so the whole block lands as one write call;
 	// holding mu prevents interleaving with other emitters even if the
 	// underlying Writer is itself unbuffered.
+	// Substitute the real run dir into the "where" line when the emitter
+	// supplied it (UIEvent.Path; see types.UIEvtSummary doc). Falls back to
+	// the literal placeholder when Path is empty (e.g., a T0 failure that
+	// never produced a run dir). Spec section 6 principle #2 (full paths,
+	// not relative) is satisfied whenever the run got past T0.
+	detailsLine := "  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n"
+	if ev.Path != "" {
+		detailsLine = fmt.Sprintf("  details: see %s/events.ndjson\n", ev.Path)
+	}
 	block := prefix +
 		"\n" +
 		"Run complete.\n" +
 		fmt.Sprintf("  exit status: %s\n", statusOrUnknown(ev.Status)) +
 		fmt.Sprintf("  finished at: %s\n", ev.Timestamp.Format(time.RFC3339)) +
-		"  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n"
+		detailsLine
 	if _, err := fmt.Fprint(r.out, block); err != nil {
 		return fmt.Errorf("plain renderer: write summary: %w", err)
 	}

@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 32 + 31-review-approve + 30-minors + CI split + repo public)
+## Project status (2026-06-05, after Tasks 33 + 34 + Task 33 review M1 fix)
 
-**Phase:** Plan 1 execution. Tasks 1-32 complete; runner package complete; verify package complete (load + rehash + top-level Verify). Repo is now PUBLIC at https://github.com/maheshmirchandani/Backup-Pro (flipped 2026-06-05 to resolve a GitHub Actions billing block; secret-scan over full history was clean before flip). CI green across all five jobs (test-linux, test, e2e-fast, e2e-safety, bench). Next: Task 32 review + Task 33 implementer (`internal/plain` renderer) in overlap.
+**Phase:** Plan 1 execution. Tasks 1-34 complete. Repo is PUBLIC at https://github.com/maheshmirchandani/Backup-Pro. CI green across all five jobs. `cmd/flashbackup` binary exists; `make verify-release` and `make build` now run end-to-end for the first time. Next: Task 34 review + Task 35 implementer (cmd/flashbackup/init.go) in overlap. Subcommands 35-41 are next.
 
 **CI architecture (commits `c3f2ca0`, `b297cc4`):** `.github/workflows/ci.yml` has `test-linux` on ubuntu-latest for portable packages (hash, state, profiles, paths, selection, runner/types, verify/*) plus lint + vet. macOS `test` job narrowed to macOS-only packages (drives, preflight subtree, rsync, runner). `bench` on ubuntu. `e2e-fast` + `e2e-safety` stay on macos-14 (need hdiutil + APFS mounts). Docs-only commits skip CI via `paths-ignore`. Public repo → unlimited Actions minutes across all runner OSes.
 
@@ -15,7 +15,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (32/58):**
+**Tasks complete (34/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -24,9 +24,11 @@
 29. Top-level runner.Run state machine + faultinject hooks in t2/t3/t4 (commit `da24cd1`; review fixes in `06a4255`)
 30. internal/verify/load manifest reader with inline HMAC verification (commit `14f73e0`; review minors in `12204ae`)
 31. internal/verify/rehash per-file rehash + classify (commit `838faee`; review verdict approve, minor #1 wording polish applied inline)
-32. internal/verify top-level Verify state machine (commit `8a5047b`; integrates load + rehash; writes per-verify summary.json)
+32. internal/verify top-level Verify state machine (commit `8a5047b`; integrates load + rehash; writes per-verify summary.json; review fixes added results.ndjson + types.ExitStatus reuse in `09b6943`)
+33. internal/plain renderer (commit `988ba49`; TTY + non-TTY modes; throttled progress; concurrency-safe; review fix M1 substituted real run-dir in summary block + plan A1 clarified types.Renderer in API Contracts)
+34. cmd/flashbackup CLI entry point (commit `19a8573`; subcommand dispatch stubs; --version with ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch + GPLv3 warranty disclaimer; second-signal-within-5s force-exit; 90.9% coverage)
 
-**Tasks remaining (26):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 33 (plain renderer), 34-41 (cmd/flashbackup CLI subcommands), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (24):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 35-41 (cmd/flashbackup subcommands: init, backup, verify, status, profiles, help), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -70,6 +72,20 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (later): Task 33 + Task 34 + Task 32-33 review fixes
+
+Task 32 review came back minor-fixes-needed with two important findings:
+- `results.ndjson` per-file forensic record was missing. Design spec section 5 calls for BOTH `summary.json` (aggregate) AND `results.ndjson` (per-file); the master plan Task 32 entry only mentioned the aggregate. Without the per-file trail an operator who sees `FilesHashMismatch=N` in summary has no way to identify WHICH files failed. Added `writeResultsNDJSON` (NDJSON, mode 0o644, atomic via `state.WriteTmpThenRename`) called from `verifyOneRun` BEFORE writeSummaryFile so both records land together; mkdir happens once. Test `TestWriteResultsNDJSON_RoundTrip` locks the on-disk schema with mixed-status PerFile slice.
+- ExitStatus constants duplicated as package-local strings instead of importing from `runner/types`. Drift trap. Fixed: import `types.ExitStatusOK` and `types.ExitStatusPreflightFailed`; keep only `ExitStatusIntegrityFailed` verify-specific (runner has no integrity_failed exit). Commit `09b6943`.
+
+Task 33 (`internal/plain` runner.Renderer terminal implementation) shipped commit `988ba49`: `NewPlainRenderer(out, isTTY) types.Renderer` with TTY/non-TTY modes; TTY suppresses file-started/completed lines and rate-limits progress at 10 Hz with `\r` overwrite; non-TTY emits per-event lines but drops UIEvtProgress to avoid pipe spam; file_failed always emits in both modes. Unknown UIEventKind fails open with `?? <kind> ...` line. `sync.Mutex` covers `out.Write` and shared state; 100-goroutine race test under `-race`. 21 top-level tests / 28 subtests, 97.2% coverage. Concurrency contract documented in doc.go ("plain owns ALL CLI output formatting").
+
+Task 33 review came back minor-fixes-needed with one substantive finding (M1): the summary block emitted literal `<USB>/.flashbackup/runs/<RunID>/events.ndjson` placeholder strings instead of the real path, breaking spec section 6 principle #2 (full paths, not relative). Fix applied inline: added `RunDir string` field to `types.RunResult` populated by `runner.Run` after T0 succeeds; `emitSummary` propagates it to `UIEvent.Path`; renderer substitutes the real path when Path is non-empty (falls back to placeholder when T0 failed). Plan API Contracts amendment (A1): clarified `NewPlainRenderer` returns `types.Renderer` not `runner.Renderer` (the prefix in the prior wording was shorthand; the interface lives in `internal/runner/types` post-PS3). Test `summary with real run dir path` locks the substitution.
+
+Task 34 (cmd/flashbackup CLI entry) shipped commit `19a8573`: signal.NotifyContext for SIGINT/SIGTERM with second-signal-within-5s force-exit at code 130; subcommand dispatcher (stubs for init/backup/verify/status/profiles/help); --version prints ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch line plus GPLv3 warranty disclaimer; refactored to testable `run(ctx, argv, stdout, stderr) int`. Makefile gained CMD_VERSION_LDFLAGS using `-X main.<name>=...` (Go linker mangles package-main vars under `main.` regardless of import path; verified empirically). `.gitignore` root-anchored so the cmd/flashbackup/ source isn't shadowed. 9 tests + 21 subtests, 90.9% coverage. **First time `make verify-release` and `make build` ran end-to-end**; both green ("OK: release binary clean of faultinject symbols").
+
+Commits this segment: `09b6943` (Task 32 review fixes), `988ba49` (Task 33 impl), `19a8573` (Task 34 impl), this commit (Task 33 review M1 + A1 + BACKLOG).
 
 ### 2026-06-05 (post-billing-rescue): Task 32 (verify top-level) + Task 31 review + CI split + repo public
 
