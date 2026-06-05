@@ -728,7 +728,7 @@ Every AC has a recorded implementation and test location. Maintained alongside t
 |---|---|---|
 | AC-1 init APFS | `internal/preflight` | `test/e2e/init_test.go` |
 | AC-2 exFAT refusal | `internal/preflight` | `test/e2e/init_test.go` (`TestE2E_Init_RefusesExFAT`) |
-| AC-3 happy copy | `internal/runner` | `test/e2e/copy_happy_test.go` |
+| AC-3 happy copy | `internal/runner` | `test/e2e/backup_happy_test.go` (`TestE2E_BackupHappy_CopyMode`) |
 | AC-4 atomic gate | `internal/runner` | `test/e2e/atomic_gate_test.go` |
 | AC-5 source mutated T0-T2 | `internal/runner` | `test/e2e/mutation_t0_t2_test.go` |
 | AC-6 mutation re-stat T3 | `internal/runner` | `test/e2e/mutation_t3_test.go` |
