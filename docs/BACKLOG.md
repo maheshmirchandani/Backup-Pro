@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 42+42a review approve + Task 43 e2e init)
+## Project status (2026-06-05, after Tasks 43-44 + Task 43 review approve)
 
-**Phase:** Plan 1 execution. Tasks 1-43 complete. Repo public. CI green. `cmd/flashbackup` covers ALL SUBCOMMANDS. `test/e2e/` package + fixtures live. First e2e test (init AC-1 + AC-2) lands. Next: Task 43 review + Task 44 implementer (e2e backup-happy AC-3).
+**Phase:** Plan 1 execution. Tasks 1-44 complete. Repo public. CI green. e2e tests landing: init (AC-1+AC-2) + backup-happy (AC-3). Next: Task 44 review + Task 45 implementer (e2e verify AC-9+AC-10).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (43/58):**
+**Tasks complete (44/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -39,9 +39,10 @@
 40. cmd/flashbackup profiles subcommand (commit `9773705`; CRUD wrapper around internal/profiles.Store: list / new / edit / delete / validate; new + edit open $EDITOR or vim fallback on a temp JSON file; editorRunOverrideForTest seam for callback-based tests; 24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%; review verdict approve; CI rescued by gosec G204 nolint on exec.CommandContext for the operator-controlled EDITOR)
 41. cmd/flashbackup help subcommand (commit `187ab5f`; constants-table `subcommandHelpTexts` maps subcommand name to detailed help text; empty-string key holds top-level usage; `printUsage` in main.go now pulls from the same table; 10 new tests including `TestHelp_AllSubcommandsHaveText` drift guard + `TestHelp_HelpTextHasNoEmDashes` content-level discipline check; 73.7% coverage; review verdict approve with cosmetic minors only; plan amendment A1 clarifies Task 41 ships verb-form `help <subcommand>` while existing handlers' fs.Usage stays untouched for v0.1)
 42. test/e2e/ helpers package + Task 42a fixture trees (commit `9d7ee87`; SetupUSB / SeedSource / SeedProfile / RunBackup / RunVerify / RunStatus / RunProfiles / RunInit + Assert helpers; binary-build cache via sync.Once per flavour; `test/fixtures/{tiny,realistic,pathological}` with MANIFEST.txt per dir; review verdict approve with 3 deferrable minors)
-43. test/e2e/init_test.go (commit `ecf5bc3`; 3 tests: HappyPath_APFS for AC-1, RefusesExFAT for AC-2, AlreadyInitialized_RefusesWithoutResetKeys; gated by FLASHBACKUP_E2E + RequireMacOS + RequireHdiutil + RequireDiskutil; ExFAT skips cleanly in sandboxed env; tagged into e2e-fast PR gate)
+43. test/e2e/init_test.go (commit `ecf5bc3`; 3 tests: HappyPath_APFS for AC-1, RefusesExFAT for AC-2, AlreadyInitialized_RefusesWithoutResetKeys; review approve with spec traceability table fix for AC-2 file path)
+44. test/e2e/backup_happy_test.go (commit `eaeb49f`; AC-3; TestE2E_BackupHappy_CopyMode; discovers GNU rsync at /opt/homebrew/bin/rsync or /usr/local/bin/rsync via --version check rejecting openrsync; line-by-line JSON parsing for events.ndjson phase set assertions; namespaced-dest assertion via paths.Prefix)
 
-**Tasks remaining (15):** 22a + 29a (queued earlier), 44 (e2e backup-happy AC-3), 45 (e2e verify-intact AC-9 + AC-10), 46 (e2e lock AC-11 + AC-12), 47 (e2e non-tty AC-15), 48 (e2e atomic gate AC-4), 49 (e2e mutation AC-5 + AC-6), 50 (e2e crash-resume AC-13), 51 (e2e delete-flag AC-14), 51a (e2e tampered manifest AC-19), 51b (e2e missing fault hooks per QA hat), 52 (e2e delete-confirm AC-7 + AC-8), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
+**Tasks remaining (14):** 22a + 29a (queued earlier), 45 (e2e verify-intact AC-9 + AC-10), 46 (e2e lock AC-11 + AC-12), 47 (e2e non-tty AC-15), 48 (e2e atomic gate AC-4), 49 (e2e mutation AC-5 + AC-6), 50 (e2e crash-resume AC-13), 51 (e2e delete-flag AC-14), 51a (e2e tampered manifest AC-19), 51b (e2e missing fault hooks per QA hat), 52 (e2e delete-confirm AC-7 + AC-8), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
