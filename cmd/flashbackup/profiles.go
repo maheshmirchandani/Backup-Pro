@@ -433,7 +433,12 @@ func runEditorSubprocess(ctx context.Context, path string, stderr io.Writer) err
 		return fmt.Errorf("EDITOR is empty after whitespace split")
 	}
 	args := append(parts[1:], path)
-	cmd := exec.CommandContext(ctx, parts[0], args...)
+	// G204 false-positive: the EDITOR env var IS operator-controlled by
+	// design (this is the established UNIX convention for $EDITOR), and the
+	// only argument we append is a temp file path we created ourselves via
+	// os.CreateTemp. There is no way to honor $EDITOR without exec'ing what
+	// the operator set; refusing would defeat the feature.
+	cmd := exec.CommandContext(ctx, parts[0], args...) //nolint:gosec // bounded: operator-controlled EDITOR + our own tempfile path
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = stderr
