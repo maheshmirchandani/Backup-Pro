@@ -70,7 +70,7 @@ var subcommandList = []struct {
 	{"verify", "Task 38", "verify the integrity of a prior run", runVerify},
 	{"status", "Task 39", "show recent run history and current state", runStatus},
 	{"profiles", "Task 40", "list, create, edit, or delete backup profiles", runProfiles},
-	{"help", "Task 41", "show help for the binary or a subcommand", nil},
+	{"help", "Task 41", "show help for the binary or a subcommand", runHelp},
 }
 
 // main is a thin wrapper over run() that wires the real os.Args, stdout,
@@ -130,24 +130,18 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 	return 2
 }
 
-// printUsage writes the short-form usage block. Kept under 24 lines so it
-// fits in a typical terminal without scrolling. The subcommand list is
-// generated from subcommandList so adding a new subcommand only requires
-// editing one place.
+// printUsage writes the top-level usage block. The body lives in
+// helptext.go under the empty-string key of subcommandHelpTexts so the
+// top-level screen, `flashbackup --help`, `flashbackup -h`, and
+// `flashbackup help` (no args) all surface identical text.
+//
+// Adding a new subcommand therefore requires two edits: a row in
+// subcommandList (this file, for the dispatcher + the docs.go exit-code
+// surface) and an entry in subcommandHelpTexts (helptext.go, for the
+// user-visible body). TestHelp_AllSubcommandsHaveText guards against
+// adding the dispatch row without the help body.
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "flashbackup - portable macOS backup utility")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  flashbackup <subcommand> [args...]")
-	fmt.Fprintln(w, "  flashbackup --version")
-	fmt.Fprintln(w, "  flashbackup --help")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Subcommands:")
-	for _, sc := range subcommandList {
-		fmt.Fprintf(w, "  %-9s %s\n", sc.name, sc.desc)
-	}
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "See https://github.com/maheshmirchandani/Backup-Pro for documentation.")
+	fmt.Fprint(w, subcommandHelpTexts[""])
 }
 
 // printVersion writes the version line plus the GPLv3 warranty disclaimer.

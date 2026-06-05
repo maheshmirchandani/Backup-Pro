@@ -161,6 +161,7 @@ func TestRun_KnownStubSubcommand(t *testing.T) {
 		"verify":   true, // Task 38; see verify_test.go
 		"status":   true, // Task 39; see status_test.go
 		"profiles": true, // Task 40; see profiles_test.go
+		"help":     true, // Task 41; see help_test.go
 	}
 	for _, sc := range subcommandList {
 		if replacedSubcommands[sc.name] {
@@ -254,6 +255,51 @@ func TestInstallSignalHandlers_CancelWithoutSignal(t *testing.T) {
 	_, cancel := installSignalHandlers(context.Background(), io.Discard)
 	cancel()
 	cancel() // second call should be a no-op via cancelOnce.
+}
+
+// TestRun_HelpSubcommand exercises the dispatch path for `flashbackup help
+// <subcommand>`. The dispatcher must route to runHelp, which prints the
+// constants-table entry for the named subcommand to stdout and exits 0.
+// This complements TestRun_HelpFlag (which covers `--help` / `-h` going
+// through the top-level printUsage path) by proving the help subcommand is
+// wired into subcommandList with the right handler.
+func TestRun_HelpSubcommand(t *testing.T) {
+	cases := []string{"init", "backup", "verify", "status", "profiles", "help"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runCapture(t, []string{"flashbackup", "help", name})
+			if code != 0 {
+				t.Errorf("exit code: got %d, want 0", code)
+			}
+			if stderr != "" {
+				t.Errorf("stderr should be empty on known subcommand help, got %q", stderr)
+			}
+			if !strings.Contains(stdout, "Usage:") {
+				t.Errorf("stdout should contain Usage: line for %q, got %q", name, stdout)
+			}
+		})
+	}
+}
+
+// TestRun_HelpSubcommand_NoArgs covers `flashbackup help` (no positional
+// after the verb). The dispatcher routes to runHelp, which prints the
+// top-level usage screen on stdout and exits 0. Asserts the same body that
+// TestRun_HelpFlag does (Usage: / Subcommands:) so a future divergence
+// between `--help` and `help` would surface here.
+func TestRun_HelpSubcommand_NoArgs(t *testing.T) {
+	code, stdout, stderr := runCapture(t, []string{"flashbackup", "help"})
+	if code != 0 {
+		t.Errorf("exit code: got %d, want 0", code)
+	}
+	if stderr != "" {
+		t.Errorf("stderr should be empty on bare help, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "Usage:") {
+		t.Errorf("stdout should contain Usage:, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "Subcommands:") {
+		t.Errorf("stdout should list Subcommands:, got %q", stdout)
+	}
 }
 
 // TestPrintVersion_DefaultValues asserts the literal default version line so
