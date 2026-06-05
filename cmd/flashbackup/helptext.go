@@ -234,9 +234,10 @@ self-reference and prints this text.
 // error rather than silently printing an empty block.
 //
 // This accessor exists so future refactors of the storage layer (e.g.
-// splitting top-level vs subcommand into two maps, or sourcing from
-// go:embed) do not break callers; the map is left exported within the
-// package because the test suite walks it for the drift-prevention check.
+// splitting top-level vs subcommand into two maps, or sourcing from a
+// `go embed` directive) do not break callers; the map is left exported
+// within the package because the test suite walks it for the
+// drift-prevention check.
 func helpTextFor(name string) string {
 	return subcommandHelpTexts[name]
 }
