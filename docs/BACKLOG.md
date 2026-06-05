@@ -2,9 +2,11 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 52 + 53: docs phase begins)
+## Project status (2026-06-05, after Tasks 53 + 54: ONE TASK LEFT)
 
-**Phase:** Plan 1 execution near end. Tasks 1-53 complete (55/58). Repo public. CI green. e2e + ERROR_CATALOG.md done. Next: Task 53 review + Task 54 (README polish). Then Task 55 (v0.1.0-core tag) completes Plan 1.
+**Phase:** Plan 1 execution near end. Tasks 1-54 complete (56/58). Repo public. CI green. e2e + ERROR_CATALOG + README done. **Final task: 55 (v0.1.0-core tag completes Plan 1).**
+
+**Queued architectural follow-ups (out of v0.1 scope):** 22a (unowned T0 event Kinds wiring) · 29a (PreflightContext test injection) · 50a (preflight orphan-recovery gate) · 50b (rsync --partial resume e2e with >tiny fixture) · 51c (--delete CLI flag + mirror-delete-DEST runner phase). Plus 2 minor plan amendments queued from Task 53 review: PA-1 (delete_failed.errno required→optional) and PA-2 (file_enumerated path Details vs top-level).
 
 ## Older status (2026-06-05, after Tasks 50-51 + Task 50 review I1/A1 + new Tasks 50a/50b/51c queued)
 
