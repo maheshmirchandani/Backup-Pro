@@ -386,7 +386,7 @@ Build tag `faultinject` (Task 28). Flag: `--inject <spec>`. Grammar:
 <keyword> ::= phase | file | after_pct | after_count
 
 Examples:
-  --inject=corrupt:phase=T1:file=foo.pdf
+  --inject=corrupt:phase=T1:file=foo.pdf       (note: for dest-corrupt-then-detect-at-T2 use phase=T2-pre; phase=T1 fires inside rsync progress callback and races with rsync's writes; refined 2026-06-05 per Task 48 implementation)
   --inject=kill:phase=T1:after_pct=50
   --inject=kill:phase=T2:file=foo.pdf
   --inject=kill:phase=T3:after_count=10
