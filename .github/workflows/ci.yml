@@ -53,10 +53,30 @@ jobs:
         run: |
           VERSION=$(cat scripts/golangci-version.txt)
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v$VERSION
-      - name: Vet (whole tree; catches cross-platform build errors)
-        run: go vet ./...
-      - name: Vet (faultinject build)
-        run: go vet -tags faultinject ./...
+      - name: Vet (portable packages; macOS-only packages vetted on the
+              macos-14 job via their go test step)
+        run: |
+          go vet \
+            ./internal/hash/... \
+            ./internal/state/... \
+            ./internal/profiles/... \
+            ./internal/paths/... \
+            ./internal/selection/... \
+            ./internal/runner/types/... \
+            ./internal/verify/...
+      - name: Vet (faultinject build; portable packages)
+        run: |
+          go vet -tags faultinject \
+            ./internal/hash/... \
+            ./internal/state/... \
+            ./internal/profiles/... \
+            ./internal/paths/... \
+            ./internal/selection/... \
+            ./internal/runner/types/... \
+            ./internal/verify/...
+      - name: Vet (cross-platform; GOOS=darwin catches darwin-only files
+              from a Linux host)
+        run: GOOS=darwin go vet ./...
       - name: gofmt -s -l (formatting drift)
         run: |
           DRIFT=$(gofmt -s -l .)
