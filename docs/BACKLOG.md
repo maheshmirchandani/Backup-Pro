@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 51b + 52: ALL E2E TESTS DONE)
+## Project status (2026-06-05, after Tasks 52 + 53: docs phase begins)
 
-**Phase:** Plan 1 execution nearing end. Tasks 1-52 complete (54/58 if counting 51a + 51b + 52). Repo public. CI green. **All 12 e2e tests done covering AC-1..AC-19 with 3 documented gaps (AC-13a, AC-14, AC-13b) queued as Tasks 50a/50b/51c.** Next: Task 52 review + Task 53 (ERROR_CATALOG.md). Then 54 (README polish), 55 (v0.1.0-core tag).
+**Phase:** Plan 1 execution near end. Tasks 1-53 complete (55/58). Repo public. CI green. e2e + ERROR_CATALOG.md done. Next: Task 53 review + Task 54 (README polish). Then Task 55 (v0.1.0-core tag) completes Plan 1.
 
 ## Older status (2026-06-05, after Tasks 50-51 + Task 50 review I1/A1 + new Tasks 50a/50b/51c queued)
 
