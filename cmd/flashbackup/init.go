@@ -1,25 +1,26 @@
 package main
 
 // init.go implements the `flashbackup init <USB-path>` subcommand
-// (Task 35, AC-1 + AC-2). It initializes a USB drive for FlashBackup use:
+// (Task 35, AC-1 + AC-2). It initializes a USB drive for FlashBackup use.
+//
+// Step ordering matches the inline body labels (Step 1 through Step 7):
 //
 //   1. Resolve the supplied path to an absolute, symlink-free mountpoint.
 //   2. Probe the filesystem via internal/preflight/filesystem; APFS and
 //      HFS+ are accepted, exFAT / msdos / unknown are refused with the
 //      reformat recipe baked into UnsupportedError (AC-2).
-//   3. Create <mountpoint>/.flashbackup/ with mode 0o700.
-//   4. Touch <mountpoint>/.metadata_never_index (mode 0o644) so Spotlight
-//      does not index the backup volume. Idempotent: existing file is left
-//      alone.
-//   5. Extract the embedded rsync binary via rsync.EnsureExtracted; the
-//      binary lands under <mountpoint>/.flashbackup/bin/<sha256>/rsync
-//      with SHA256 verification (matches the path the runner consults at
-//      gate 9, so init + run agree).
-//   6. Write a fresh <mountpoint>/.flashbackup/version.json with a random
-//      32-byte HMAC key via state.InitVersionFile. Refuses to overwrite
-//      an existing version.json unless --reset-keys is passed (the friction
-//      is the feature: overwriting silently would invalidate every prior
-//      manifest because the HMAC key changes).
+//   3. version.json overwrite gate. Runs BEFORE any disk writes so a
+//      refused second-init leaves the volume untouched. --reset-keys
+//      bypasses; bypassing rotates the HMAC key and invalidates every
+//      prior manifest.
+//   4. Create <mountpoint>/.flashbackup/ with mode 0o700.
+//   5. Touch <mountpoint>/.metadata_never_index (mode 0o644) so Spotlight
+//      does not index the backup volume. Idempotent.
+//   6. Extract the embedded rsync via rsync.EnsureExtracted; binary lands
+//      at <mountpoint>/.flashbackup/bin/<sha256>/rsync with SHA256
+//      verification (matches the path the runner consults at gate 9).
+//   7. Write <mountpoint>/.flashbackup/version.json via state.InitVersionFile
+//      with a fresh random 32-byte HMAC key (AC-1).
 //
 // Exit codes follow the contract in cmd/flashbackup/doc.go:
 //

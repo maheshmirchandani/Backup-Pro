@@ -2,9 +2,13 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 33 + 34 + Task 33 review M1 fix)
+## Project status (2026-06-05, after Tasks 35 + 36 + Task 35 review approve)
 
-**Phase:** Plan 1 execution. Tasks 1-34 complete. Repo is PUBLIC at https://github.com/maheshmirchandani/Backup-Pro. CI green across all five jobs. `cmd/flashbackup` binary exists; `make verify-release` and `make build` now run end-to-end for the first time. Next: Task 34 review + Task 35 implementer (cmd/flashbackup/init.go) in overlap. Subcommands 35-41 are next.
+**Phase:** Plan 1 execution. Tasks 1-36 complete. Repo public. CI green. `cmd/flashbackup` has init + backup subcommands wired end-to-end; with `runner.Run` now linked from cmd, the `make verify-release` symbol-scan gate has a real positive control for the first time. Next: Task 36 review + Task 37 implementer (backup move-mode `Type DELETE` confirmation modal) in overlap.
+
+**Latent infrastructure debt** (tracked, not blocking):
+- A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
+- A2: `cmd/flashbackup/main.go` dispatcher now has 2 real-handler arms (init, backup) + 4 stub arms. Refactor `subcommandList` to carry a `handler` field before Task 38 adds the third real handler.
 
 **CI architecture (commits `c3f2ca0`, `b297cc4`):** `.github/workflows/ci.yml` has `test-linux` on ubuntu-latest for portable packages (hash, state, profiles, paths, selection, runner/types, verify/*) plus lint + vet. macOS `test` job narrowed to macOS-only packages (drives, preflight subtree, rsync, runner). `bench` on ubuntu. `e2e-fast` + `e2e-safety` stay on macos-14 (need hdiutil + APFS mounts). Docs-only commits skip CI via `paths-ignore`. Public repo → unlimited Actions minutes across all runner OSes.
 
@@ -15,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (34/58):**
+**Tasks complete (36/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -26,9 +30,11 @@
 31. internal/verify/rehash per-file rehash + classify (commit `838faee`; review verdict approve, minor #1 wording polish applied inline)
 32. internal/verify top-level Verify state machine (commit `8a5047b`; integrates load + rehash; writes per-verify summary.json; review fixes added results.ndjson + types.ExitStatus reuse in `09b6943`)
 33. internal/plain renderer (commit `988ba49`; TTY + non-TTY modes; throttled progress; concurrency-safe; review fix M1 substituted real run-dir in summary block + plan A1 clarified types.Renderer in API Contracts)
-34. cmd/flashbackup CLI entry point (commit `19a8573`; subcommand dispatch stubs; --version with ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch + GPLv3 warranty disclaimer; second-signal-within-5s force-exit; 90.9% coverage)
+34. cmd/flashbackup CLI entry point (commit `19a8573`; subcommand dispatch stubs; --version with ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch + GPLv3 warranty disclaimer; second-signal-within-5s force-exit; 90.9% coverage; review fixes in `477e24a` for subcommand label off-by-one + spec amendment to "any second SIGINT or SIGTERM")
+35. cmd/flashbackup init subcommand (commit `3644204`; AC-1 + AC-2; refuses exFAT with reformat recipe; refuses overwrite without `--reset-keys`; rsync.EnsureExtracted wired; 83.1% coverage; review approve with cosmetic doc-step renumbering applied)
+36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control)
 
-**Tasks remaining (24):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 35-41 (cmd/flashbackup subcommands: init, backup, verify, status, profiles, help), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (22):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 37 (backup move-confirm modal), 38 (verify subcommand), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -72,6 +78,18 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (even later): Tasks 35 + 36 + Task 34 review fix
+
+Task 34 review came back minor-fixes-needed with one important (I1: subcommand-to-task labels off-by-one for verify/status/profiles/help; the master plan maps backup to Task 36 + Task 37 move-confirm, then verify=38, status=39, profiles=40, help=41) and several minors. I1 fixed in `477e24a`; minor m1+A1 also applied: amended spec section 6 from "second signal of the same type" to "any second SIGINT or SIGTERM" so the simpler rule matches the implementation and the user mental model (people press Ctrl-C twice; the type-swap case is rare).
+
+Task 35 (`cmd/flashbackup/init.go`) shipped commit `3644204` with 14 test functions covering AC-1 (happy path APFS) and AC-2 (exFAT refused with reformat recipe). Filesystem validation reuses `internal/preflight/filesystem.Validate`; rsync extracts via `rsync.EnsureExtracted` (sha-keyed path; matches the runner's preflight gate 9 path so init + run agree without a hardcoded literal). `--reset-keys` is defense-in-depth: init.go pre-checks via os.Stat with a friendlier message ("WARNING: invalidates every prior manifest on this USB"), state.InitVersionFile re-enforces internally. `--help` returns exit 0. Three pure-Go macOS tests use `t.TempDir()` (APFS on macOS) so cmd/flashbackup coverage stays at 83.1% without the FLASHBACKUP_E2E gate. ExFAT test skips in sandboxed agent envs (hdiutil ExFAT denied); runs on dev machine.
+
+Task 35 review verdict: approve. Three minors (M1: doc-step numbering skew between header and body; M2: cleanup helper duplication across 4 tests; M3: Version package-var awareness for Plan 2). M1 applied inline (renumbered header from 6 to 7 steps to match body). M2 + M3 tracked. Plus two plan amendments (A1: extract hdiutil helpers to internal/testutil before Task 38 makes copy #7; A2: refactor subcommandList to carry a handler field before Task 38 adds the third real-handler arm). Both A1 and A2 tracked as latent infrastructure debt above; not blocking Task 37 (move-confirm modal touches only backup.go).
+
+Task 36 (`cmd/flashbackup/backup.go`) shipped commit `bf99233`: runs runner.Run end-to-end with plain renderer. Argv: `flashbackup backup <profile> <USB> [--move]`. `--move` prints a Task 37 redirect and exits 2 for v0.1. ExitStatus mapping: ok=0, partial=1, copy_only_aborted_delete=1, crashed_resumed=1, preflight_failed=2. Profile lookup uses the canonical single-document `<USB>/.flashbackup/profiles.json` path (NOT per-profile JSON files; the brief was slightly aspirational, the actual store layout is the canonical one). isTTY detection uses `os.File.Stat()` + `os.ModeCharDevice` (no golang.org/x/term dep). 12 unit + 2 e2e tests; cmd/flashbackup coverage 80.8%. Added a `FLASHBACKUP_RSYNC_PATH_FOR_TEST` env-var seam to internal/runner/runner.go so external test packages (cmd/flashbackup, future test/e2e) can substitute the system GNU rsync (the package-private `rsyncPathOverrideForTest` is unreachable from external test packages). **First commit where the verify-release symbol-scan gate has a real positive control** — `flashbackup-faultinject` now links the runner package and `go tool nm` confirms `runner.faultinjectBuildTagPresent` is present in the faultinject build.
+
+Commits this segment: `477e24a` (Task 34 review I1 + A1), `3644204` (Task 35 impl), `bf99233` (Task 36 impl), this commit (Task 35 review M1 + BACKLOG/memory through Task 36).
 
 ### 2026-06-05 (later): Task 33 + Task 34 + Task 32-33 review fixes
 
