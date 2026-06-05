@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 39 + 40 + Task 39 review I1+I2)
+## Project status (2026-06-05, after Tasks 40 + 41 + Task 40 review approve + CI rescue)
 
-**Phase:** Plan 1 execution. Tasks 1-40 complete. Repo public. CI green (pending the Task 40 rerun after the transient Go-module-tar collision; em-dash fix CI just kicked off). `cmd/flashbackup` covers init + backup (copy + move) + verify + status + profiles (CRUD with $EDITOR). `internal/testutil` houses shared hdiutil helpers. Dispatcher uses `subcommandList[].handler` field. Next: Task 40 review + Task 41 implementer (help subcommand: constants-table for help text per Tech Writer hat).
+**Phase:** Plan 1 execution. Tasks 1-41 complete. Repo public. CI green after two fixes (workflow cache step removal + gosec nolint for EDITOR exec). `cmd/flashbackup` covers ALL SUBCOMMANDS: init + backup + verify + status + profiles + help. Constants-table-driven help text. Next: Task 41 review + Task 42 implementer (e2e helpers package + fixture trees).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (40/58):**
+**Tasks complete (41/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -36,9 +36,10 @@
 37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8; review fixes amended spec section 4 + AC-7 + AC-8 + ExitStatusCopyOnlyAbortedDelete to reflect the pre-T0 gate architecture instead of the originally-specced post-T2 modal; M2 SIGINT comment tightened; M4 `deleteToken` const replaces dead `ev.Path` marker)
 38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 14 tests; cmd/flashbackup coverage 87.1%; review verdict approve with one important I1: renderer summary "details: see" line was wrong for verify — fixed by switching UIEvent.Path semantics from "run dir" to "exact artifact file path" so each producer names its own artifact)
 39. cmd/flashbackup status subcommand with --json (commit `4f69943`; locked JSON schema per API Contracts; tabular plain text default; last_run from runs.ndjson scan; last_verify from scan-and-pick-newest by VerifiedAt; lock status via stat; 26 tests; cmd/flashbackup coverage 73.6%; review fixes: scrubbed 4 em-dash violations in status_helpers.go + status_test.go; plan amendment locks `last_run.profile` as omitempty)
-40. cmd/flashbackup profiles subcommand (commit `9773705`; CRUD wrapper around internal/profiles.Store: list / new / edit / delete / validate; new + edit open $EDITOR or vim fallback on a temp JSON file; editorRunOverrideForTest seam for callback-based tests; 24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%)
+40. cmd/flashbackup profiles subcommand (commit `9773705`; CRUD wrapper around internal/profiles.Store: list / new / edit / delete / validate; new + edit open $EDITOR or vim fallback on a temp JSON file; editorRunOverrideForTest seam for callback-based tests; 24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%; review verdict approve; CI rescued by gosec G204 nolint on exec.CommandContext for the operator-controlled EDITOR)
+41. cmd/flashbackup help subcommand (commit `187ab5f`; constants-table `subcommandHelpTexts` maps subcommand name to detailed help text; empty-string key holds top-level usage; `printUsage` in main.go now pulls from the same table; 9 new tests including `TestHelp_AllSubcommandsHaveText` drift guard + `TestHelp_HelpTextHasNoEmDashes` content-level discipline check; 73.7% coverage)
 
-**Tasks remaining (18):** 22a + 29a (queued earlier), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (17):** 22a + 29a (queued earlier), 42-42a (test/e2e package boundary + fixture trees), 43-52 (e2e tests: init, backup-happy, verify-intact, lock, non-tty, atomic gate, mutation, crash-resume, delete-flag, delete-confirm, fault-kill, AC-19 tamper), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -82,6 +83,31 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Tasks 40 review approve + Task 41 (help) + 2 CI rescues
+
+Task 40 review verdict: approve, 6 minors (all cosmetic/deferrable):
+- M1 (`runEditorSubprocess` 0% test coverage): TTY-dependent code is hard to unit test; deferred.
+- M2 (stdin/stdout to os.Stdin/Stdout asymmetry vs stderr to passed io.Writer): mixed signature is correct (vim needs the real TTY); doc'd inline.
+- M3 (`*` + `.DS_Store` skeleton choice undocumented): correct decision (allowlist forbids `**`); inline comment missing.
+- M4 (coverage 73.9% measured by reviewer vs 80.2% reported by implementer): file-scoped vs package-aggregate discrepancy; just noting.
+- M5 (exit-code-1 brief claim wrong; impl is correct).
+- M6 (profiles.go 516 lines exceeds 200-line guideline): convention is "suggest splitting"; defer with possibly a `profiles_editor.go` split later.
+
+Task 41 (`cmd/flashbackup/help.go` + `helptext.go`) shipped commit `187ab5f`. Constants table `subcommandHelpTexts` maps subcommand name to detailed help text. Empty-string key holds top-level usage; `printUsage` in main.go now pulls from the same table, removing duplicated text. Help text follows Tech Writer hat convention: Usage / Description / Flags / Examples / See also. Each subcommand has at least one concrete invocation example.
+
+Tests: `TestHelp_AllSubcommandsHaveText` iterates over `subcommandList` and asserts every name has an entry in the table (prevents drift when a new subcommand lands without help text). `TestHelp_HelpTextHasNoEmDashes` scans every entry for U+2014 / U+2013 and fails if either is present (extends CLAUDE.md em-dash discipline from code to user-visible help strings).
+
+Design decisions:
+- Did NOT refactor existing init/backup/verify/status/profiles fs.Usage funcs to pull from the table; runHelp reads directly from the table while existing handlers keep their own local Usage blocks as a fallback so `flashbackup <subcommand> --help` continues working even if a future helptext edit shadows or empties an entry.
+- `help help` self-reference: just a "help" entry in the table; `flashbackup help help` prints the help-subcommand's own body.
+- `flashbackup help --help` lands in the "unknown" arm: `--help` is a binary-level flag, not a subcommand of `help`.
+
+CI rescues:
+- `b43b2f2`: removed redundant actions/cache@v4 step from .github/workflows/ci.yml. `setup-go@v5` already does module caching with the same go.sum-based key; the redundant step caused tar collisions on `~/go/pkg/mod` ("Cannot open: File exists" for ~20 pgregory.net/rapid files).
+- `6ebac26`: added `//nolint:gosec G204` on `exec.CommandContext(parts[0], args...)` in profiles.go runEditorSubprocess. EDITOR env var IS operator-controlled by design (POSIX convention); refusing would defeat the feature. First exec.Command in cmd/flashbackup, so the lint surfaced only now.
+
+Commits this segment: `9773705` (Task 40 profiles; earlier), `292fbb7` (Task 39 review I1+I2; earlier), `d5b5d47` (BACKLOG through Task 40; earlier), `b43b2f2` (CI cache fix), `187ab5f` (Task 41 help), `6ebac26` (CI gosec fix), this commit (Task 40 review approve + Task 41 + BACKLOG through Task 41).
 
 ### 2026-06-05 (latest): Tasks 39 review fixes + Task 40 (profiles) + transient CI
 
