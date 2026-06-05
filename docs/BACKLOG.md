@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 35 + 36 + Task 35 review approve)
+## Project status (2026-06-05, after Tasks 36 + 37 + Task 36 review approve)
 
-**Phase:** Plan 1 execution. Tasks 1-36 complete. Repo public. CI green. `cmd/flashbackup` has init + backup subcommands wired end-to-end; with `runner.Run` now linked from cmd, the `make verify-release` symbol-scan gate has a real positive control for the first time. Next: Task 36 review + Task 37 implementer (backup move-mode `Type DELETE` confirmation modal) in overlap.
+**Phase:** Plan 1 execution. Tasks 1-37 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with DELETE confirmation modal). Next: Task 37 review + Task 38 implementer (verify subcommand). Task 38 will bundle the A1+A2 infra cleanup (extract hdiutil helpers to internal/testutil; refactor subcommandList to carry a handler field) so the third real-handler arm and the seventh hdiutil-helper dup never land.
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (36/58):**
+**Tasks complete (37/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -32,9 +32,10 @@
 33. internal/plain renderer (commit `988ba49`; TTY + non-TTY modes; throttled progress; concurrency-safe; review fix M1 substituted real run-dir in summary block + plan A1 clarified types.Renderer in API Contracts)
 34. cmd/flashbackup CLI entry point (commit `19a8573`; subcommand dispatch stubs; --version with ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch + GPLv3 warranty disclaimer; second-signal-within-5s force-exit; 90.9% coverage; review fixes in `477e24a` for subcommand label off-by-one + spec amendment to "any second SIGINT or SIGTERM")
 35. cmd/flashbackup init subcommand (commit `3644204`; AC-1 + AC-2; refuses exFAT with reformat recipe; refuses overwrite without `--reset-keys`; rsync.EnsureExtracted wired; 83.1% coverage; review approve with cosmetic doc-step renumbering applied)
-36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control)
+36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control; review verdict approve)
+37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8)
 
-**Tasks remaining (22):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 37 (backup move-confirm modal), 38 (verify subcommand), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (21):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 38 (verify subcommand + bundle A1 testutil extraction + A2 dispatcher handler-field refactor), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -78,6 +79,20 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Tasks 36 review approve + Task 37 (DELETE confirm modal)
+
+Task 36 review verdict: **approve**. Two non-actionable minor flags (M1: typed-nil renderer pitfall for future refactor; M2: profile file-mode mismatch between seedProfile test fixture and runtime Upsert — both immaterial). No fixes applied.
+
+Task 37 (`cmd/flashbackup/backup.go` + new `backup_prompt.go`) shipped commit `7123a81`: replaces the `--move` refusal gate with `promptDeleteConfirm`. Design picked **Option A** (renderer-driven prompt) per the brief: cmd composes the multi-line warning (PERMANENT DELETION + atomic-gate protection + "Type DELETE (exact case) to proceed") into a single `UIEvent{Kind:UIEvtPrompt, Path:"DELETE", Status:warning}`; the existing renderer.writePrompt handler writes `ev.Status + " "` with no trailing newline so the operator types immediately after the prompt. Status field carrying warning text is a slight semantic stretch (Status usually holds ExitStatus-style values) but pragmatic; reviewer let it stand.
+
+Stdin reading via `bufio.Scanner` (default ScanLines + 64KiB buffer cap). Exact case-sensitive byte-equality against "DELETE"; `delete`, `DELETE ` (trailing space), ` DELETE` (leading), `DELETE\t`, `Delete`, empty all decline. EOF before line → `io.ErrUnexpectedEOF` → exit 1 (loud failure for scripted invocations that pipe nothing). Ctx-aware read deliberately punted (`bufio.Scanner` doesn't honor ctx; pre-call ctx.Err() check handles the pre-cancelled case; SIGINT mid-read interrupts the syscall and surfaces as ErrUnexpectedEOF).
+
+runBackup signature grows an `io.Reader stdin` param; `main.go run()` signature follows; tests pass `bytes.NewBufferString("DELETE\n")`. `TestBackup_MoveModeRefused` renamed to `TestBackup_MoveModeBadMountpoint` (the gate no longer flat-refuses). 9 unit tests in backup_prompt_test.go (1 happy + 1 table-driven decline with 11 sub-cases + EOF + pre-cancelled ctx + warning text + no-trailing-newline) plus 3 new e2e tests (declined-empty, declined-wrong-token, accepted-invokes-runner). cmd/flashbackup coverage 78.3% (above 70% bar). All 8 pre-commit gates green.
+
+Exit-code map: accept → runner exit; decline → exit 2 (`aborted by operator (DELETE not typed)`); EOF → exit 1 (`move confirmation failed: unexpected EOF`).
+
+Commits this segment: `7123a81` (Task 37 impl), this commit (BACKLOG/memory through Task 37).
 
 ### 2026-06-05 (even later): Tasks 35 + 36 + Task 34 review fix
 
