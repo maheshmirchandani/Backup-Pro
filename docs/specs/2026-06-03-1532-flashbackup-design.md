@@ -704,7 +704,7 @@ GIVEN a backup was killed mid-T1, WHEN user re-runs the same backup, THEN the ne
 GIVEN a backup was killed mid-T1 with partial files on the dest, WHEN user re-runs the same backup, THEN rsync resumes the partial files via `--partial` (does not re-transfer from zero), T2 verifies all files, and the new run exits 0. (Split from original AC-13; exercising this requires a fixture larger than tiny so the `--partial` resume math is observable. Queued as Task 50b.)
 
 **AC-14: --delete protects user-added files.**
-GIVEN destination contains a manually-copied `<USB>/<hostname>-me/Documents/manual.txt` never written by FlashBackup, WHEN user runs backup with `--delete` (mirror mode), THEN `manual.txt` remains untouched, summary shows `files_extra_in_dest = 1`, and exit code is 0.
+GIVEN destination contains a manually-copied `<USB>/<hostname>-me/Documents/manual.txt` never written by FlashBackup, WHEN user runs backup with `--delete` (mirror mode), THEN `manual.txt` remains untouched and exit code is 0; a subsequent `flashbackup verify` shows `files_extra_in_dest >= 1` in `summary.json`. (Refined 2026-06-05 per Task 51 review: the `files_extra_in_dest` counter is a verify-side surface (`internal/verify/verify.go:163`), not a backup-side one; AC-14 verification requires two commands in v0.1, or AC-14 can be promoted to a single-command assertion in Plan 2 by extending the runner FinishedRun struct.)
 
 **AC-15: Non-TTY fallback to plain text.**
 GIVEN user runs `flashbackup backup my-docs --start | tee log.txt`, WHEN the run proceeds, THEN no ANSI control sequences are written to the pipe, `log.txt` contains plain-text line-per-event progress, and the run completes normally.
