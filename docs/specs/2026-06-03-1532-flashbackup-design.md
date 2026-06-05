@@ -204,7 +204,9 @@ Internal package decomposition:
 
 **`mode` enum:** `copy` | `move` | `verify` | `init`.
 
-**`exit_status` enum:** `ok` (all verified, all deletions completed if move-mode), `partial` (some files failed verification; no deletions in move-mode), `copy_only_aborted_delete` (move-mode user typed anything other than DELETE), `crashed_resumed` (orphaned run was finalized by a later preflight), `preflight_failed` (lock contention, exFAT, etc.).
+**`exit_status` enum:** `ok` (all verified, all deletions completed if move-mode), `partial` (some files failed verification; no deletions in move-mode), `copy_only_aborted_delete` (move-mode run started and T1+T2 completed but the atomic gate fired so T3 was skipped), `crashed_resumed` (orphaned run was finalized by a later preflight), `preflight_failed` (lock contention, exFAT, etc.).
+
+Note: a move-mode operator who declines the upfront DELETE prompt (section 4 below) never reaches the runner; no runs.ndjson record is written and no `exit_status` is produced. The `copy_only_aborted_delete` status applies only to the runner-side atomic gate, not to the cmd-side pre-T0 prompt. Refined 2026-06-05 per Task 37 review A2.
 
 ## Section 3: Backup-run data flow
 
@@ -236,7 +238,9 @@ PREFLIGHT (T0) → ENUMERATE (T0+) → TRANSFER (T1) → HASH + COMPARE (T2) →
 - Empty source directories: left in place. Aggressive directory cleanup risks losing data if enumeration missed a file.
 - Immutable files (`uchg`, `schg`): record `failed_immutable`, leave alone, continue.
 
-**Upfront confirmation prompt.** After T2 succeeds, before T3 starts, the TUI presents a centered modal with red border. User must type literal `DELETE` (case-sensitive) and press Enter to proceed. Any other input aborts cleanly; verified copies stay at destination. Exit_status `copy_only_aborted_delete`. No CLI flag to skip this prompt, not even in `--quiet`. The friction is the feature.
+**Upfront confirmation prompt.** Before T0 begins, the cmd layer presents a multi-line warning + `Type DELETE (exact case) to proceed` prompt to stdout, then reads one line from stdin. The operator must type literal `DELETE` and press Enter to proceed. Any other input aborts BEFORE any file is copied or deleted; the run is not started, no runs.ndjson record is written, and the cmd exits with code 2. No CLI flag to skip this prompt, not even in `--quiet`. The friction is the feature.
+
+Architecture note (Task 37 implementation reality, 2026-06-05): the prompt fires pre-T0 (not post-T2 as initially specified). The post-T2 model would have required a cmd↔runner callback contract that does not exist in the current runner; the pre-T0 gate is architecturally simpler and arguably safer (no copies are made if the operator declines). The verified-copies-stay-at-destination guarantee is reframed as "no copies are made if the operator declines." Future Plan 2 TUI may revisit the post-T2 model when the cmd↔TUI event bus is in place.
 
 **Move-mode manifest fields.** Each manifest line gains `deletion_status`: deleted / skipped_mutated / failed_immutable / failed_permission / null (copy mode).
 
@@ -676,10 +680,10 @@ GIVEN a source file is modified by an external process between T0+ enumeration a
 GIVEN move-mode passes the atomic gate and all files are verified, WHEN one file's mtime changes between T2 and T3 (via fault-injection hook), THEN T3 unlinks the unchanged files but skips that one file, deletion-log records `skipped_mutated` for that file, `deletions_skipped_due_to_mutation = 1` in the run summary, and exit code is 0.
 
 **AC-7: DELETE confirmation honored (abort).**
-GIVEN move-mode T2 completes and the confirmation modal appears, WHEN user types `delete` (lowercase), THEN T3 is skipped, exit_status=`copy_only_aborted_delete`, no source files deleted, and exit code is 0.
+GIVEN move-mode is selected and the cmd-level prompt appears, WHEN user types `delete` (lowercase) or any other non-`DELETE` input, THEN the runner is NOT invoked (no T0 / T1 / T3 occurs), no runs.ndjson record is written, stderr names the abort with "aborted by operator (DELETE not typed)", and the process exits with code 2. (Refined 2026-06-05 per Task 37 review: the pre-T0 gate replaces the original post-T2 modal.)
 
 **AC-8: DELETE confirmation accepted.**
-GIVEN the confirmation modal appears, WHEN user types `DELETE` (uppercase) and presses Enter, THEN T3 proceeds with per-file mutation re-stat and exits 0 if all unlinks succeed.
+GIVEN the cmd-level prompt appears, WHEN user types `DELETE` (exact case) and presses Enter, THEN the runner is invoked with `Mode: ModeMove`, T0..T4 execute, T3 proceeds with per-file mutation re-stat, and exits 0 if all unlinks succeed. (Refined 2026-06-05 per Task 37 review: the pre-T0 gate replaces the original post-T2 modal.)
 
 **AC-9: Verify intact backup.**
 GIVEN a backup that completed successfully 1 hour ago, WHEN user runs `flashbackup verify`, THEN every file is rehashed, every hash matches the manifest, summary shows `files_verified == files_checked`, and exit code is 0.

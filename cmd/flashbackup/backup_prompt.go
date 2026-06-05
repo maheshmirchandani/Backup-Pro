@@ -38,17 +38,14 @@ package main
 //
 //   - Ctx awareness: bufio.Scanner does not honour context cancellation
 //     directly (it blocks on the underlying io.Reader's Read). For the
-//     real os.Stdin case, a SIGINT during the read would interrupt the
-//     read syscall and the Scanner returns false with no token; we
-//     surface that as io.ErrUnexpectedEOF (the operator hit Ctrl-C
-//     before typing). For the bytes.Buffer case (tests), the Scanner
-//     reads synchronously without blocking; ctx is checked once before
-//     the read so a pre-cancelled ctx is honoured but the actual read
-//     proceeds without ctx integration. This is a deliberate punt:
-//     wrapping os.Stdin in a goroutine-driven cancellable reader is more
-//     complexity than the cmd-layer interaction warrants, and the real
-//     blast radius of "operator started typing then sent SIGINT" is the
-//     read-syscall interruption path which already works correctly.
+//     bytes.Buffer case (tests), ctx is checked once before the read so a
+//     pre-cancelled ctx is honoured. For the real os.Stdin TTY case, a
+//     first SIGINT does NOT interrupt the read syscall (macOS restarts
+//     the read via ERESTART); the operator must hit Enter to exit the
+//     prompt, or send a second SIGINT within 5s to trigger the
+//     installSignalHandlers force-exit in main. The first-SIGINT escape
+//     valve is the second-signal handler, not the prompt itself.
+//     Refined 2026-06-05 per Task 37 review M2.
 
 import (
 	"bufio"
@@ -59,6 +56,12 @@ import (
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 )
+
+// deleteToken is the exact literal the operator must type to confirm move
+// mode. Case-sensitive byte equality; no trim, no normalize. Defined here
+// (not on the UIEvent) so the cmd-side comparison is the single source of
+// truth; the renderer never reads it.
+const deleteToken = "DELETE"
 
 // errDeleteAborted is returned by promptDeleteConfirm when the operator
 // declines the move-mode prompt (typed anything other than the literal
@@ -97,16 +100,19 @@ func promptDeleteConfirm(ctx context.Context, renderer types.Renderer, in io.Rea
 	}
 
 	// Compose the warning + prompt in ev.Status; ev.Path carries the
-	// literal expected token as documentation (the renderer ignores it,
-	// but the brief calls for Path:"DELETE" and a future renderer that
-	// wants to highlight the token can read it from there).
+	// Status carries the multi-line warning; the renderer's writePrompt
+	// handler writes ev.Status + " " with no trailing newline so the
+	// operator types right after the prompt. The expected token is the
+	// deleteToken constant below (was previously stashed in ev.Path; per
+	// Task 37 review M4 we promoted it to a named const so the
+	// cmd-side comparison has a clear single source of truth that does
+	// not rely on the UIEvent contract.).
 	warning := "WARNING: move mode will PERMANENTLY DELETE source files after they verify on the USB.\n" +
 		"Files that fail verification are NOT deleted (the atomic gate protects you).\n" +
 		"\n" +
 		"Type DELETE (exact case) to proceed, anything else to abort:"
 	ev := types.UIEvent{
 		Kind:   types.UIEvtPrompt,
-		Path:   "DELETE",
 		Status: warning,
 	}
 	if err := renderer.OnEvent(ctx, ev); err != nil {
@@ -129,7 +135,7 @@ func promptDeleteConfirm(ctx context.Context, renderer types.Renderer, in io.Rea
 	}
 
 	got := scanner.Text()
-	if got != ev.Path {
+	if got != deleteToken {
 		// Decline path: anything other than exact "DELETE". Includes
 		// empty (""), lowercase ("delete"), typos ("DELET"), trailing
 		// whitespace ("DELETE "), leading whitespace (" DELETE"), and

@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 36 + 37 + Task 36 review approve)
+## Project status (2026-06-05, after Tasks 37 + 38 + A1 + A2 + Task 37 review fixes)
 
-**Phase:** Plan 1 execution. Tasks 1-37 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with DELETE confirmation modal). Next: Task 37 review + Task 38 implementer (verify subcommand). Task 38 will bundle the A1+A2 infra cleanup (extract hdiutil helpers to internal/testutil; refactor subcommandList to carry a handler field) so the third real-handler arm and the seventh hdiutil-helper dup never land.
+**Phase:** Plan 1 execution. Tasks 1-38 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with pre-T0 DELETE confirmation) + verify (with --all / --check-extras / explicit run-id). `internal/testutil` houses shared hdiutil helpers across 7 test files. Dispatcher uses `subcommandList[].handler` field for scaleable subcommand wiring. Next: Task 38 review + Task 39 implementer (status subcommand with --json schema).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (37/58):**
+**Tasks complete (38/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -33,9 +33,10 @@
 34. cmd/flashbackup CLI entry point (commit `19a8573`; subcommand dispatch stubs; --version with ldflag-injected Version/RsyncVersion/CommitSHA/BuildEpoch + GPLv3 warranty disclaimer; second-signal-within-5s force-exit; 90.9% coverage; review fixes in `477e24a` for subcommand label off-by-one + spec amendment to "any second SIGINT or SIGTERM")
 35. cmd/flashbackup init subcommand (commit `3644204`; AC-1 + AC-2; refuses exFAT with reformat recipe; refuses overwrite without `--reset-keys`; rsync.EnsureExtracted wired; 83.1% coverage; review approve with cosmetic doc-step renumbering applied)
 36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control; review verdict approve)
-37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8)
+37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8; review fixes amended spec section 4 + AC-7 + AC-8 + ExitStatusCopyOnlyAbortedDelete to reflect the pre-T0 gate architecture instead of the originally-specced post-T2 modal; M2 SIGINT comment tightened; M4 `deleteToken` const replaces dead `ev.Path` marker)
+38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 8 unit + 6 e2e tests; cmd/flashbackup coverage 79.0%)
 
-**Tasks remaining (21):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 38 (verify subcommand + bundle A1 testutil extraction + A2 dispatcher handler-field refactor), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (20):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -79,6 +80,31 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Task 37 review + Task 38 + A1 + A2
+
+Task 37 review verdict: minor-fixes-needed with one important (I1: spec-vs-impl semantic drift on WHEN the DELETE prompt fires — spec said "post-T2 modal" with exit 0 on decline; impl does "pre-T0 cmd-side gate" with exit 2 on decline) + 4 minors + 2 plan/spec amendments. I1 is "spec catches up to code" rather than a code change: the runner has no callback hook for cmd-side post-T2 confirmation and adding one would be invasive; the pre-T0 placement is architecturally simpler and arguably safer (no copies made if declined).
+
+Applied inline:
+- Spec section 4 (Upfront confirmation prompt): rewritten to describe the pre-T0 cmd-level prompt with stdin read + exit 2 on decline; architecture note explains why post-T2 modal was abandoned (no cmd↔runner callback contract).
+- Spec line 207 (exit_status enum): `copy_only_aborted_delete` narrowed to "T1+T2 completed but atomic gate fired"; added note that operator-declined-DELETE never reaches the runner so produces no runs.ndjson record.
+- Spec AC-7 + AC-8: GIVEN/WHEN/THEN rewritten to match pre-T0 cmd flow.
+- Master plan line 2489 (Task 37 entry): added temporal placement clarification.
+- Minor M2 in backup_prompt.go: tightened the SIGINT-during-prompt comment (first SIGINT does NOT interrupt the read syscall on macOS TTYs; the safety net is the installSignalHandlers second-signal-within-5s force-exit, not the prompt itself).
+- Minor M4 in backup_prompt.go: promoted the expected token to a `deleteToken` constant. Previously `ev.Path = "DELETE"` was the live comparison source despite the doc claiming it was "documentation only"; reviewer was right to flag the drift trap. The single source of truth is now the const, not the UIEvent.
+
+Deferred: minor M1 (cosmetic test name), minor M3 (CRLF-acceptance docs).
+
+Task 38 (`cmd/flashbackup/verify.go`) shipped in 3 commits per the bundled scope:
+- `db6972a` — A1 testutil extraction. Created `internal/testutil/{doc.go, hdiutil_darwin.go, hdiutil_other.go}`. Exports: `RequireE2E`, `RequireMacOS`, `RequireDiskutil`, `RequireHdiutil`, `MountTempVolume(t, fsType)`. The two prior mount variants (`mountTempVolume(t)` + `mountTempVolumeFS(t, fsType)`) collapsed into one parametric entrypoint. 7 test files updated to import testutil and call the shared exports. Non-darwin file panics on `MountTempVolume` if reached past the `RequireMacOS` guard.
+- `8dc7de3` — A2 dispatcher handler-field refactor. `subcommandList` entries now have `handler subcommandHandler` (`func(ctx, argv, stdin, stdout, stderr) int`); nil means dispatchStub. `runInit` + `runBackup` signatures normalized to accept stdin even when unused (init explicitly discards with `_ = stdin`). The run() dispatcher loop becomes a 4-line if-handler-then-call. No behavior change.
+- `4dfe3ca` — verify subcommand. `flashbackup verify [--all | <run-id>] [--check-extras] <USB-path>`. Mutually exclusive --all and run-id rejected at cmd layer for a better error message. ExitStatus mapping: ok=0, integrity_failed=1, preflight_failed=2, default=1. 14 new tests (8 unit + 6 e2e). cmd/flashbackup coverage 79.0% (above 70% bar). Files: verify.go (187 lines), verify_helpers.go (46 lines), verify_test.go (571 lines).
+
+Implementer hit one fixture bug: first E2E test concatenated `host+"-"+user` literally for the namespaced dest, but `paths.Prefix` swaps dots for hyphens (`macbook.local` → `macbook-local`). Switched to `paths.Namespaced(...)` so the rehash loop finds the planted files. Caught + fixed in `4dfe3ca`.
+
+All 7 pre-commit gates green after the third commit.
+
+Commits this segment: `7123a81` (Task 37 impl), `8ec2063` (BACKLOG through Task 37), `db6972a` (A1 testutil), `8dc7de3` (A2 handler-field), `4dfe3ca` (Task 38 verify), this commit (Task 37 review I1+A1+A2+M2+M4 + BACKLOG through Task 38).
 
 ### 2026-06-05 (latest): Tasks 36 review approve + Task 37 (DELETE confirm modal)
 
