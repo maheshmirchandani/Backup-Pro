@@ -97,14 +97,14 @@ test-faultinject:
 #  e2e-safety: gates main push; faultinject + hdiutil-heavy; flaky-tolerant on PR
 e2e-fast:
 	@if [ -d ./test/e2e ]; then \
-		FLASHBACKUP_E2E=1 go test -timeout=5m -run "Init|BackupHappy|VerifyIntact|LockContention|NonTTY" ./test/e2e/...; \
+		FLASHBACKUP_E2E=1 go test -timeout=5m -run "Init|BackupHappy|VerifyIntact|LockContention|NonTTY|DeleteConfirm" ./test/e2e/...; \
 	else \
 		echo "skip: ./test/e2e/ does not exist yet"; \
 	fi
 
 e2e-safety:
 	@if [ -d ./test/e2e ]; then \
-		FLASHBACKUP_E2E=1 go test -timeout=15m -tags faultinject -run "AtomicGate|Mutation|CrashResume|DeleteFlag|DeleteConfirm|TamperedManifest|FaultKill|Fault_Unmount|Fault_DiskFull" ./test/e2e/...; \
+		FLASHBACKUP_E2E=1 go test -timeout=15m -tags faultinject -run "AtomicGate|Mutation|CrashResume|DeleteFlag|TamperedManifest|FaultKill|Fault_Unmount|Fault_DiskFull" ./test/e2e/...; \
 	else \
 		echo "skip: ./test/e2e/ does not exist yet"; \
 	fi
