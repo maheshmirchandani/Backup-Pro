@@ -423,6 +423,7 @@ func namespacedDestPath(t *testing.T, usb, entryPath string) string {
 	if err != nil {
 		t.Fatalf("os.Hostname: %v", err)
 	}
+	//nolint:gosec // bounded: /usr/bin/whoami absolute path, no args
 	uname, err := exec.Command("/usr/bin/whoami").Output()
 	if err != nil {
 		t.Fatalf("whoami: %v", err)

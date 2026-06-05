@@ -154,6 +154,7 @@ func TestE2E_DeleteFlag_RemovesObsoleteButProtectsUserFiles(t *testing.T) {
 	// we mirror that here so the assertion stays in lockstep with the
 	// runner's single source of truth.
 	hostname, _ := os.Hostname()
+	//nolint:gosec // bounded: /usr/bin/whoami absolute path, no args
 	uname, _ := exec.Command("/usr/bin/whoami").Output()
 	username := strings.TrimSpace(string(uname))
 	nsDir := paths.Prefix(hostname, username)

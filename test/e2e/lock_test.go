@@ -321,6 +321,7 @@ func writeLockFile(t *testing.T, path string, l lockFile) {
 // (stale recovery instead of HeldLockError), which is itself a strong
 // signal to update the test.
 func psLstartUnix(pid int) (int64, error) {
+	//nolint:gosec // bounded: /bin/ps absolute path, pid is test-generated int
 	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	out, err := cmd.Output()
@@ -351,6 +352,7 @@ func psLstartUnix(pid int) (int64, error) {
 // lock, surfacing as a confusing test failure that would itself prompt a
 // re-sync of the two implementations.
 func queryIOPlatformUUID() (string, error) {
+	//nolint:gosec // bounded: /usr/sbin/ioreg absolute path, static args
 	out, err := exec.Command("/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
 	if err != nil {
 		return fallbackHostnameForLockTest(), nil
@@ -389,6 +391,7 @@ func fallbackHostnameForLockTest() string {
 //     not paper over the test.
 //   - The reap is deterministic; we control the timing.
 func spawnAndReap() (int, error) {
+	//nolint:gosec // bounded: /usr/bin/true absolute path, no args
 	cmd := exec.Command("/usr/bin/true")
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("start /usr/bin/true: %w", err)

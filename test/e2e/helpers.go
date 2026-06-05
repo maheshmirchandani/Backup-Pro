@@ -44,6 +44,7 @@ func SetupUSB(t *testing.T, sizeMB int) string {
 	// Run `flashbackup init` so .flashbackup/ exists; subsequent backup /
 	// verify / status calls then have a real version.json + rsync to use.
 	bin := BuildBinary(t)
+	//nolint:gosec // bounded: bin is our just-built test binary
 	cmd := exec.Command(bin, "init", usb)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -87,6 +88,7 @@ func SeedSource(t *testing.T, fixtureName string) string {
 	switch fixtureName {
 	case "pathological":
 		script := filepath.Join(fixtureSrc, "mkfixtures.sh")
+		//nolint:gosec // bounded: /bin/bash + repo-internal script + test-controlled dest
 		cmd := exec.Command("/bin/bash", script, dest)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("mkfixtures.sh %s failed: %v\n%s", dest, err, out)
@@ -185,6 +187,7 @@ func RunBackupFaultinject(t *testing.T, profile, usb string,
 // shape (stdout/stderr capture, exec.ExitError unwrap).
 func runCLIWithBinary(t *testing.T, bin string, args []string, stdin string) (int, string, string) {
 	t.Helper()
+	//nolint:gosec // bounded: bin is a just-built test binary path
 	cmd := exec.Command(bin, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -245,6 +248,7 @@ func RunProfiles(t *testing.T, action string, args ...string) (int, string, stri
 func runCLI(t *testing.T, args []string, stdin string) (int, string, string) {
 	t.Helper()
 	bin := BuildBinary(t)
+	//nolint:gosec // bounded: bin is our just-built test binary
 	cmd := exec.Command(bin, args...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)

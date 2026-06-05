@@ -177,6 +177,7 @@ func TestE2E_BackupHappy_CopyMode(t *testing.T) {
 	// with what the runner computed (single source of truth per
 	// invariant #15).
 	hostname, _ := os.Hostname()
+	//nolint:gosec // bounded: /usr/bin/whoami absolute path, no args
 	uname, _ := exec.Command("/usr/bin/whoami").Output()
 	username := strings.TrimSpace(string(uname))
 	nsDir := paths.Prefix(hostname, username)
@@ -217,6 +218,7 @@ func findGNURsync() string {
 		if _, err := os.Stat(candidate); err != nil {
 			continue
 		}
+		//nolint:gosec // bounded: candidate is from a hardcoded list of system rsync paths
 		out, err := exec.Command(candidate, "--version").Output()
 		if err != nil {
 			continue

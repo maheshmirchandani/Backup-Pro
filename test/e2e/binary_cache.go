@@ -84,6 +84,7 @@ func buildBinaryAtPath(prefix string, extraArgs []string) (string, error) {
 	args = append(args, extraArgs...)
 	args = append(args, "-o", binPath, "./cmd/flashbackup")
 
+	//nolint:gosec // bounded: building our own cmd from $PATH go in a test context
 	cmd := exec.Command("go", args...)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
