@@ -36,6 +36,21 @@ var flashbackupVersion = "0.1.0-core"
 // and never reassigned outside *_test.go files.
 var rsyncPathOverrideForTest string
 
+// rsyncPathEnvOverride is the name of the environment variable that, when
+// set to a non-empty absolute path, replaces pc.RsyncPath at the same seam
+// as rsyncPathOverrideForTest. Test-only escape hatch for external test
+// packages (cmd/flashbackup, test/e2e) that cannot reach the package-private
+// rsyncPathOverrideForTest var; the runner's own tests prefer the in-process
+// var because it composes with t.Cleanup more naturally. Production callers
+// MUST leave this unset; FlashBackup itself never reads any other env var
+// that affects run behaviour (the runner's behaviour is determined by
+// RunOptions + the on-disk state, not by ambient env).
+//
+// Documented here so a future audit reading runner.go can see that the
+// env-var path exists; the actual read sits next to the in-process var
+// below.
+const rsyncPathEnvOverride = "FLASHBACKUP_RSYNC_PATH_FOR_TEST"
+
 // Run is the top-level FlashBackup state machine. It stitches the six phase
 // functions (T0 preflight, T0+ enumerate, T1 transfer, T2 hash+compare,
 // T3 delete-source, T4 finalize) into one orchestrated invocation:
@@ -162,9 +177,14 @@ func Run(ctx context.Context, opts types.RunOptions) (*types.RunResult, error) {
 	pc := t0.PreflightContext
 	defer func() { _ = pc.Release() }()
 
-	// Test-only RsyncPath substitution. See rsyncPathOverrideForTest doc.
+	// Test-only RsyncPath substitution. The in-process var takes precedence
+	// over the env-var path so the runner's own tests (which use t.Cleanup
+	// to restore the var) are not affected by stale env state from a parent
+	// process. See rsyncPathOverrideForTest + rsyncPathEnvOverride docs.
 	if rsyncPathOverrideForTest != "" {
 		pc.RsyncPath = rsyncPathOverrideForTest
+	} else if v := os.Getenv(rsyncPathEnvOverride); v != "" {
+		pc.RsyncPath = v
 	}
 
 	// Decode the HMAC key once; ReadVersionFile already validated shape so

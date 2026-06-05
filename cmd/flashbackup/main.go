@@ -105,6 +105,12 @@ func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
 			// name and the subcommand so runInit sees only its own
 			// positional path + flags.
 			return runInit(ctx, argv[2:], stdout, stderr)
+		case "backup":
+			// Task 36: real implementation. argv[2:] is <profile-name>
+			// <USB-path> [--move]. runner.Run owns the rest. Task 37
+			// will replace the in-handler --move refusal with a real
+			// DELETE confirmation prompt.
+			return runBackup(ctx, argv[2:], stdout, stderr)
 		default:
 			return dispatchStub(ctx, sc.name, sc.task, stderr)
 		}
