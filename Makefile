@@ -3,7 +3,40 @@
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 export SOURCE_DATE_EPOCH
 
+# COMMIT_SHA is captured for the --version build identity string. Falls back
+# to "(unset)" so a `make build` outside a git checkout (rare, but possible
+# in a tarball extract) does not break. The value is one of the four version
+# strings injected via -X into cmd/flashbackup main.
+COMMIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "(unset)")
+
+# FLASHBACKUP_VERSION is the human-facing version string for --version.
+# Bumped by hand on release; defaults to the dev pre-release tag so a local
+# `make build` produces a self-identifying binary without a tag operation.
+FLASHBACKUP_VERSION ?= 0.1.0-core
+
+# RSYNC_VERSION is the version of the embedded GNU rsync that ships with the
+# release binary. Set here (not parsed from the binary) so the --version
+# line matches the build pipeline's contract even before Task 12a wires the
+# real rsync binary discovery.
+RSYNC_VERSION ?= 3.4.1
+
 GOFLAGS := -trimpath -buildvcs=false
+
+# CMD_VERSION_LDFLAGS injects the four build-identity strings into
+# cmd/flashbackup's package vars (Version, RsyncVersion, CommitSHA,
+# BuildEpoch) so the --version line shows the real build identity. Kept as
+# a separate variable so both release and faultinject builds can share the
+# same -X surface without duplicating the path prefix.
+#
+# The symbol path is "main.<name>" (NOT the full import path) because the
+# Go linker mangles all package-main vars under "main." regardless of the
+# import path. Verified empirically 2026-06-05: -X with the import-path
+# form is silently ignored, leaving defaults in place.
+CMD_VERSION_LDFLAGS := \
+	-X main.Version=$(FLASHBACKUP_VERSION) \
+	-X main.RsyncVersion=$(RSYNC_VERSION) \
+	-X main.CommitSHA=$(COMMIT_SHA) \
+	-X main.BuildEpoch=$(SOURCE_DATE_EPOCH)
 
 # LDFLAGS for release builds: strip DWARF (smaller binary), strip buildid for
 # reproducibility, KEEP the Go symbol table so the verify-release gate
@@ -19,13 +52,13 @@ GOFLAGS := -trimpath -buildvcs=false
 # faultinject leak would be invisible. Keeping the symbol table costs ~1MB
 # in binary size; we treat that as the cost of having a working release
 # gate.
-LDFLAGS_RELEASE := -w -buildid= -X github.com/maheshmirchandani/Backup-Pro/internal/preflight/codesign.IsReleaseBuild=true
+LDFLAGS_RELEASE := -w -buildid= -X github.com/maheshmirchandani/Backup-Pro/internal/preflight/codesign.IsReleaseBuild=true $(CMD_VERSION_LDFLAGS)
 
 # LDFLAGS for the faultinject build: matches release flag policy (strip
 # DWARF, keep symbols) so the build artifact has the same symbol
 # visibility as a release binary. IsReleaseBuild stays "false" so codesign
 # isn't invoked against an unsigned faultinject artifact during e2e runs.
-LDFLAGS_FAULTINJECT := -w -buildid=
+LDFLAGS_FAULTINJECT := -w -buildid= $(CMD_VERSION_LDFLAGS)
 
 build:
 	@if [ -d ./cmd/flashbackup ]; then \

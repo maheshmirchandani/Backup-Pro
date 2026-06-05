@@ -1,6 +1,8 @@
-# Binaries
-flashbackup
-flashbackup-*
+# Binaries (anchored to repo root so cmd/flashbackup/ source files are NOT
+# matched; an unanchored "flashbackup" rule also matches the cmd/flashbackup
+# subdirectory, hiding the entire package from git tracking).
+/flashbackup
+/flashbackup-*
 *.exe
 *.dll
 *.so
