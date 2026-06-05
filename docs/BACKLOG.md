@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 48-49 + Task 48 review fix)
+## Project status (2026-06-05, after Tasks 49-50 + spec traceability sync + new Task 50a queued)
 
-**Phase:** Plan 1 execution. Tasks 1-49 complete. Repo public. CI green. e2e tests: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation (AC-5+AC-6). Spec AC-4 fixed to say `copy_only_aborted_delete` matching the canonical enum. Next: Task 49 review + Task 50 (e2e crash-resume AC-13).
+**Phase:** Plan 1 execution. Tasks 1-50 complete. Repo public. CI green. e2e tests: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation + crash-resume (AC-13 test skips with documented architectural gap). **New Task 50a queued: orphan-recovery preflight gate that finalizes `event=started` runs without matching `finished` lines as ExitStatus=crashed_resumed. The test infrastructure for AC-13 is ready; flipping the skip to assertions requires the producer-side gate.** Next: Task 50 review + Task 51 (e2e delete-flag AC-14).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (49/58):**
+**Tasks complete (50/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -45,9 +45,12 @@
 46. test/e2e/lock_test.go (commit `781c92f`; AC-11 + AC-12; HeldBlocksConcurrentBackup uses test's own PID with real start_time_unix + IOPlatformUUID for full liveness check; StaleLockBypassed uses reaped /usr/bin/true PID; lock_stale_detected event Kind assertion punted because the lock package silently recovers without emitting a phase event — maps to Task 22a)
 47. test/e2e/non_tty_test.go (commit `230293b`; AC-15; review approve clean)
 48. test/e2e/atomic_gate_test.go + cmd/flashbackup/inject_{faultinject,release}.go (commit `0193291`; AC-4; --inject CLI flag wired; phase=T2-pre; review I1 fixed: spec AC-4 narrative now says copy_only_aborted_delete + atomic_gate_blocked event + no deletion-log)
-49. test/e2e/mutation_test.go (commit `b8ba6fc`; AC-5 + AC-6; T2GateClassifiesSourceMutated uses mutate-source:phase=T2-pre:file=a.txt; T3ReStatSkipsUnlink uses mutate-source:phase=T3-pre:file=a.txt; AC-6 exits 0 because FilesFailed tracks T2 outcomes only — deletion skips don't count toward failure)
+49. test/e2e/mutation_test.go (commit `b8ba6fc`; AC-5 + AC-6; review approve)
+50. test/e2e/crash_resume_test.go (commit `18d8fe3`; AC-13 architectural gap documented; kill:phase=T1:after_pct=50 propagates ErrFaultKill; orphan started line confirmed in runs.ndjson; second backup detects but does NOT finalize the orphan as crashed_resumed; test skips with clear "AC-13 orphan finalization gap" message; future-state assertions ready below the skip so wiring the recovery gate switches them on with zero test changes)
 
-**Tasks remaining (9):** 22a + 29a (queued earlier), 50 (e2e crash-resume AC-13), 51 (e2e delete-flag AC-14), 51a (e2e tampered manifest AC-19), 51b (e2e missing fault hooks per QA hat), 52 (e2e delete-confirm AC-7 + AC-8), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
+**Tasks remaining (8):** 22a + 29a + 50a (NEW — preflight orphan-recovery gate), 51 (e2e delete-flag AC-14), 51a (e2e tampered manifest AC-19), 51b (e2e missing fault hooks per QA hat), 52 (e2e delete-confirm AC-7 + AC-8), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
+
+**Task 50a (new, queued):** wire a preflight gate that scans `<DotDir>/runs.ndjson` for `event=started` entries lacking a matching `event=finished` for the same run_id; finalize each orphan with a synthetic FinishedRun (`ExitStatus=crashed_resumed`, preserved StartedAt, `FinishedAt=time.Now().UTC()`, metadata from the orphan started line). Emit an audit event for the recovery. Once shipped, the `t.Skip` in `crash_resume_test.go` flips to assertion automatically (the future-state checks already exist below the skip). Out of scope for v0.1 core engine per Task 29's documented punt at `runner.go:78-79`; consider for Plan 2 or a late-Plan-1 amendment.
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)

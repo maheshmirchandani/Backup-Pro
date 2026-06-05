@@ -730,14 +730,14 @@ Every AC has a recorded implementation and test location. Maintained alongside t
 | AC-2 exFAT refusal | `internal/preflight` | `test/e2e/init_test.go` (`TestE2E_Init_RefusesExFAT`) |
 | AC-3 happy copy | `internal/runner` | `test/e2e/backup_happy_test.go` (`TestE2E_BackupHappy_CopyMode`) |
 | AC-4 atomic gate | `internal/runner` | `test/e2e/atomic_gate_test.go` |
-| AC-5 source mutated T0-T2 | `internal/runner` | `test/e2e/mutation_t0_t2_test.go` |
-| AC-6 mutation re-stat T3 | `internal/runner` | `test/e2e/mutation_t3_test.go` |
-| AC-7 DELETE abort | `internal/tui` + `internal/runner` | `test/e2e/delete_confirm_abort_test.go` |
-| AC-8 DELETE accept | `internal/tui` + `internal/runner` | `test/e2e/delete_confirm_accept_test.go` |
-| AC-9 verify intact | `internal/verify` | `test/e2e/verify_intact_test.go` |
-| AC-10 verify tampered | `internal/verify` | `test/e2e/verify_tampered_test.go` |
-| AC-11 concurrency lock | `internal/preflight` | `test/e2e/lock_contention_test.go` |
-| AC-12 stale lock recovery | `internal/preflight` | `test/e2e/lock_stale_test.go` |
+| AC-5 source mutated T0-T2 | `internal/runner` | `test/e2e/mutation_test.go` (`TestE2E_Mutation_T2GateClassifiesSourceMutated`) |
+| AC-6 mutation re-stat T3 | `internal/runner` | `test/e2e/mutation_test.go` (`TestE2E_Mutation_T3ReStatSkipsUnlink`) |
+| AC-7 DELETE abort | `cmd/flashbackup` + `internal/runner` | `test/e2e/delete_confirm_test.go` (Task 52; AC-7 covered cmd-side at unit level today via cmd/flashbackup/backup_prompt_test.go) |
+| AC-8 DELETE accept | `cmd/flashbackup` + `internal/runner` | `test/e2e/delete_confirm_test.go` (Task 52) |
+| AC-9 verify intact | `internal/verify` | `test/e2e/verify_test.go` (`TestE2E_VerifyIntact_HappyPath`) |
+| AC-10 verify reports counters | `internal/verify` | `test/e2e/verify_test.go` (`TestE2E_VerifyIntact_MissingFile` + `_HashMismatch`) |
+| AC-11 concurrency lock | `internal/preflight` | `test/e2e/lock_test.go` (`TestE2E_LockContention_HeldBlocksConcurrentBackup`) |
+| AC-12 stale lock recovery | `internal/preflight` | `test/e2e/lock_test.go` (`TestE2E_LockContention_StaleLockBypassed`) |
 | AC-13 crash recovery rsync --partial | `internal/runner` + `internal/rsync` | `test/e2e/crash_resume_test.go` |
 | AC-14 --delete protects user files | `internal/runner` | `test/e2e/delete_flag_protects_test.go` |
 | AC-15 non-TTY fallback | `internal/tui` | `test/e2e/non_tty_test.go` |
