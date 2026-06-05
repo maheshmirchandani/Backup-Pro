@@ -1,18 +1,76 @@
 package main
 
-// backup_helpers.go holds the two small helpers that backup.go would
-// otherwise push over the 200-line file budget: the ExitStatus -> process
-// exit-code translator (backupExitCode) and the stdlib-only TTY detector
-// (isTTYWriter). Both are pure functions with no I/O side effects, so they
-// belong here rather than alongside the argv-parse / runner-invoke pipeline
-// in backup.go.
+// backup_helpers.go holds the small helpers that backup.go would otherwise
+// push over the 200-line file budget: the ExitStatus -> process exit-code
+// translator (backupExitCode), the stdlib-only TTY detector (isTTYWriter),
+// and the USB-path + profile resolver (resolveBackupTargets). The first
+// two are pure; the third does Stat / EvalSymlinks / profile-store I/O,
+// but the I/O is one tight block of error returns and belongs next to the
+// other backup-subcommand plumbing.
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
+	"github.com/maheshmirchandani/Backup-Pro/internal/profiles"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 )
+
+// resolveBackupTargets resolves the operator-supplied USB path to an
+// absolute, symlink-free mountpoint and loads the named profile from
+// <mountpoint>/.flashbackup/profiles.json. On success it returns the
+// mountpoint, the loaded profile, and (0, nil). On failure it returns a
+// non-zero exit code (matching the cmd-level contract) and an error
+// pre-formatted with the "flashbackup backup:" prefix; backup.go just
+// surfaces err to stderr and returns the code.
+//
+// Exit-code rationale:
+//   - backupExitCodeUsage (2) for any operator-fixable path failure
+//     (bad path, missing profile, not-a-directory) since these are
+//     "you typed the wrong thing" failures.
+//   - backupExitCodeRuntime (1) for an inability to open the profile
+//     store itself (would indicate a filesystem-level issue on the
+//     mounted USB).
+func resolveBackupTargets(usbPath, profileName string) (
+	mountpoint string, profile profiles.Profile, code int, err error,
+) {
+	abs, err := filepath.Abs(usbPath)
+	if err != nil {
+		return "", profiles.Profile{}, backupExitCodeUsage,
+			fmt.Errorf("flashbackup backup: resolve %q: %w", usbPath, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", profiles.Profile{}, backupExitCodeUsage,
+			fmt.Errorf("flashbackup backup: %q: %w", abs, err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", profiles.Profile{}, backupExitCodeUsage,
+			fmt.Errorf("flashbackup backup: stat %q: %w", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", profiles.Profile{}, backupExitCodeUsage,
+			fmt.Errorf("flashbackup backup: %q is not a directory", resolved)
+	}
+	storePath := filepath.Join(resolved, ".flashbackup", "profiles.json")
+	store, err := profiles.NewStore(storePath)
+	if err != nil {
+		return "", profiles.Profile{}, backupExitCodeRuntime,
+			fmt.Errorf("flashbackup backup: open profile store: %w", err)
+	}
+	p, err := store.Get(profileName)
+	if err != nil {
+		// store.Get's error already names the missing profile; exit 2
+		// because this is operator-fixable (wrong name) rather than a
+		// runtime failure of an otherwise-valid run.
+		return "", profiles.Profile{}, backupExitCodeUsage,
+			fmt.Errorf("flashbackup backup: %w", err)
+	}
+	return resolved, p, 0, nil
+}
 
 // backupExitCode translates a runner.RunResult into the process exit code.
 // Centralized so the table stays close to the doc.go contract; a future

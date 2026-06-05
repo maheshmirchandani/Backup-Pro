@@ -26,11 +26,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/maheshmirchandani/Backup-Pro/internal/plain"
-	"github.com/maheshmirchandani/Backup-Pro/internal/profiles"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner"
 	"github.com/maheshmirchandani/Backup-Pro/internal/runner/types"
 )
@@ -65,6 +62,11 @@ func runBackup(ctx context.Context, argv []string, stdin io.Reader, stdout, stde
 	moveMode := fs.Bool("move", false,
 		"move mode (delete source files after verified copy); "+
 			"requires typing literal DELETE at the upfront prompt")
+	// --inject is registered behind the faultinject build tag (see
+	// inject_faultinject.go); on a release build, registerInjectFlag is
+	// a no-op and any --inject occurrence trips the standard flag-package
+	// "flag provided but not defined" rejection.
+	injects := registerInjectFlag(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: flashbackup backup <profile-name> <USB-path> [--move]")
 		fmt.Fprintln(stderr, "")
@@ -101,47 +103,14 @@ func runBackup(ctx context.Context, argv []string, stdin io.Reader, stdout, stde
 	profileName := rest[0]
 	usbPath := rest[1]
 
-	// Resolve the USB path to an absolute, symlink-free mountpoint. Same
-	// EvalSymlinks discipline as init.go: a missing path fails here with a
-	// clear error rather than producing a half-formed run dir later.
-	abs, err := filepath.Abs(usbPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "flashbackup backup: resolve %q: %v\n", usbPath, err)
-		return backupExitCodeUsage
-	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		fmt.Fprintf(stderr, "flashbackup backup: %q: %v\n", abs, err)
-		return backupExitCodeUsage
-	}
-	mountpoint := resolved
-	mpInfo, err := os.Stat(mountpoint)
-	if err != nil {
-		fmt.Fprintf(stderr, "flashbackup backup: stat %q: %v\n", mountpoint, err)
-		return backupExitCodeUsage
-	}
-	if !mpInfo.IsDir() {
-		fmt.Fprintf(stderr, "flashbackup backup: %q is not a directory\n", mountpoint)
-		return backupExitCodeUsage
-	}
-
-	// Open the profile store. NewStore creates the parent dir
-	// (<mountpoint>/.flashbackup) with mode 0o700 if missing; an
-	// uninitialized USB therefore yields a "profile not found" error from
-	// Get rather than a confusing parent-dir-create failure.
-	storePath := filepath.Join(mountpoint, ".flashbackup", "profiles.json")
-	store, err := profiles.NewStore(storePath)
-	if err != nil {
-		fmt.Fprintf(stderr, "flashbackup backup: open profile store: %v\n", err)
-		return backupExitCodeRuntime
-	}
-	profile, err := store.Get(profileName)
-	if err != nil {
-		// Get's error already names the profile; we add the binary prefix.
-		// Exit 2 because this is operator-fixable (wrong name) not a runtime
-		// failure of an otherwise-valid run.
-		fmt.Fprintf(stderr, "flashbackup backup: %v\n", err)
-		return backupExitCodeUsage
+	// Resolve USB path + load profile. Helper returns the prefixed
+	// error verbatim (matching the inlined formatting this block used to
+	// own) plus the right exit code for each failure mode; see
+	// backup_helpers.go for the exit-code rationale table.
+	mountpoint, profile, resolveCode, resolveErr := resolveBackupTargets(usbPath, profileName)
+	if resolveErr != nil {
+		fmt.Fprintln(stderr, resolveErr.Error())
+		return resolveCode
 	}
 
 	// Build the runner options. Mode defaults to ModeCopy; the --move
@@ -173,6 +142,15 @@ func runBackup(ctx context.Context, argv []string, stdin io.Reader, stdout, stde
 			return backupExitCodeRuntime
 		}
 		opts.Mode = types.ModeMove
+	}
+
+	// Install any --inject specs (no-op on release builds; faults are
+	// parsed + activated on the faultinject build). Done AFTER the move-
+	// mode confirmation gate so a declined --move with --inject still
+	// exits cleanly without arming faults in the global active list.
+	if err := activateInjects(stderr, injects); err != nil {
+		fmt.Fprintf(stderr, "flashbackup backup: %v\n", err)
+		return backupExitCodeUsage
 	}
 
 	// Invoke the runner. The orchestrator owns all in-run signal handling,

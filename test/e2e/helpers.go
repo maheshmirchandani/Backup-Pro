@@ -150,6 +150,61 @@ func RunBackupStdin(t *testing.T, stdin, profile, usb string, extraArgs ...strin
 	return runCLI(t, args, stdin)
 }
 
+// RunBackupFaultinject execs the faultinject-tagged binary with one or
+// more --inject specs and a stdin payload. Returns (exitCode, stdout,
+// stderr). Used by safety tests (Tasks 48 to 51b in the master plan) that
+// need to drive the runner through specific failure modes via the DSL
+// documented in internal/runner/faultinject.go.
+//
+// Flag layout: every --inject occurrence is placed BEFORE the
+// positional <profile> <usb> args so the standard flag.Parse stop-at-
+// first-positional rule does not swallow them. extraArgs (typically
+// `--move`) are placed after the injects but before the positionals for
+// the same reason.
+//
+// stdin is fed verbatim; callers including a trailing newline for the
+// `DELETE` move-mode confirmation are expected to include it themselves
+// (e.g. "DELETE\n"). An empty stdin closes the descriptor immediately.
+func RunBackupFaultinject(t *testing.T, profile, usb string,
+	extraArgs []string, injectSpecs []string, stdin string,
+) (int, string, string) {
+	t.Helper()
+	bin := BuildFaultinjectBinary(t)
+	args := []string{"backup"}
+	for _, spec := range injectSpecs {
+		args = append(args, "--inject="+spec)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, profile, usb)
+	return runCLIWithBinary(t, bin, args, stdin)
+}
+
+// runCLIWithBinary is the binary-parameterized variant of runCLI used by
+// RunBackupFaultinject so the cache lookup hits BuildFaultinjectBinary
+// rather than BuildBinary. The two helpers share the rest of the exec
+// shape (stdout/stderr capture, exec.ExitError unwrap).
+func runCLIWithBinary(t *testing.T, bin string, args []string, stdin string) (int, string, string) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	code := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			code = exitErr.ExitCode()
+		} else {
+			t.Fatalf("exec %s %v: %v", bin, args, err)
+		}
+	}
+	return code, stdout.String(), stderr.String()
+}
+
 // RunInit execs `flashbackup init <usb> [extraArgs...]`. Useful for
 // re-init tests (--reset-keys) and for the negative-path init tests
 // that need the cached binary rather than the in-process runInit.
