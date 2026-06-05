@@ -52,11 +52,11 @@ var subcommandList = []struct {
 	desc string
 }{
 	{"init", "Task 35", "initialize a USB volume for FlashBackup"},
-	{"backup", "Task 36", "run a backup using a profile"},
-	{"verify", "Task 37", "verify the integrity of a prior run"},
-	{"status", "Task 38", "show recent run history and current state"},
-	{"profiles", "Task 39", "list, create, edit, or delete backup profiles"},
-	{"help", "Task 40", "show help for the binary or a subcommand"},
+	{"backup", "Task 36 (+ Task 37 move-confirm)", "run a backup using a profile"},
+	{"verify", "Task 38", "verify the integrity of a prior run"},
+	{"status", "Task 39", "show recent run history and current state"},
+	{"profiles", "Task 40", "list, create, edit, or delete backup profiles"},
+	{"help", "Task 41", "show help for the binary or a subcommand"},
 }
 
 // main is a thin wrapper over run() that wires the real os.Args, stdout,

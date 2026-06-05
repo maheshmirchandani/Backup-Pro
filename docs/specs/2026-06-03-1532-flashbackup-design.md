@@ -296,7 +296,7 @@ SIGINT / SIGTERM caught at process start. Each phase has a designated cancellati
 - T2 (hash): complete current file's hash (1-2s), halt.
 - T3 (delete): complete current unlink (atomic syscall), halt; deletion-log captures progress.
 
-Second signal of the same type within 5 seconds forces immediate exit.
+Any second SIGINT or SIGTERM within 5 seconds forces immediate exit (exit code 130). The implementation accepts either signal as the trigger because the typical operator behavior is "press Ctrl-C twice" rather than swap signal types; refined 2026-06-05 per Task 34 review.
 
 ### Sleep prevention
 
