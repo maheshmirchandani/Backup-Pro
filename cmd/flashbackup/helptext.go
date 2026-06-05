@@ -17,7 +17,7 @@ package main
 //
 //	<short description, 1 to 3 sentences>
 //
-//	Flags:
+//	Flags:           (or Actions: or Subcommands: as appropriate for shape)
 //	  <flag>      <one-line description>
 //	  ...
 //
@@ -26,6 +26,11 @@ package main
 //	  <concrete invocation 2>
 //
 //	See also: <comma-separated related subcommands>
+//
+// Section-header convention (Task 41 review M3): substitute "Actions:"
+// when the subcommand has no flags but takes a verb (e.g. profiles); use
+// "Subcommands:" for the help subcommand's own list. The shape follows
+// the surface, not the literal label.
 //
 // Em-dash / en-dash discipline applies to this file as much as any other:
 // help text is user-visible, so the CLAUDE.md rule is enforced both in code

@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 40 + 41 + Task 40 review approve + CI rescue)
+## Project status (2026-06-05, after Tasks 41 review + Task 42+42a)
 
-**Phase:** Plan 1 execution. Tasks 1-41 complete. Repo public. CI green after two fixes (workflow cache step removal + gosec nolint for EDITOR exec). `cmd/flashbackup` covers ALL SUBCOMMANDS: init + backup + verify + status + profiles + help. Constants-table-driven help text. Next: Task 41 review + Task 42 implementer (e2e helpers package + fixture trees).
+**Phase:** Plan 1 execution. Tasks 1-42 complete (Task 42 + 42a bundled). Repo public. CI green after 3 fixes (workflow cache step removal + gosec G204 nolint for EDITOR + SA9009 staticcheck rephrasing). `cmd/flashbackup` covers ALL SUBCOMMANDS. `test/e2e/` package houses helpers + binary-build cache + assertion helpers. `test/fixtures/{tiny,realistic,pathological}` checked in with MANIFEST.txt per dir. Next: Task 42 review + Task 43 implementer (test/e2e/init_test.go for AC-1 + AC-2).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (41/58):**
+**Tasks complete (42/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -37,9 +37,10 @@
 38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 14 tests; cmd/flashbackup coverage 87.1%; review verdict approve with one important I1: renderer summary "details: see" line was wrong for verify — fixed by switching UIEvent.Path semantics from "run dir" to "exact artifact file path" so each producer names its own artifact)
 39. cmd/flashbackup status subcommand with --json (commit `4f69943`; locked JSON schema per API Contracts; tabular plain text default; last_run from runs.ndjson scan; last_verify from scan-and-pick-newest by VerifiedAt; lock status via stat; 26 tests; cmd/flashbackup coverage 73.6%; review fixes: scrubbed 4 em-dash violations in status_helpers.go + status_test.go; plan amendment locks `last_run.profile` as omitempty)
 40. cmd/flashbackup profiles subcommand (commit `9773705`; CRUD wrapper around internal/profiles.Store: list / new / edit / delete / validate; new + edit open $EDITOR or vim fallback on a temp JSON file; editorRunOverrideForTest seam for callback-based tests; 24 test functions / ~37 subtests; cmd/flashbackup coverage 80.2%; review verdict approve; CI rescued by gosec G204 nolint on exec.CommandContext for the operator-controlled EDITOR)
-41. cmd/flashbackup help subcommand (commit `187ab5f`; constants-table `subcommandHelpTexts` maps subcommand name to detailed help text; empty-string key holds top-level usage; `printUsage` in main.go now pulls from the same table; 9 new tests including `TestHelp_AllSubcommandsHaveText` drift guard + `TestHelp_HelpTextHasNoEmDashes` content-level discipline check; 73.7% coverage)
+41. cmd/flashbackup help subcommand (commit `187ab5f`; constants-table `subcommandHelpTexts` maps subcommand name to detailed help text; empty-string key holds top-level usage; `printUsage` in main.go now pulls from the same table; 10 new tests including `TestHelp_AllSubcommandsHaveText` drift guard + `TestHelp_HelpTextHasNoEmDashes` content-level discipline check; 73.7% coverage; review verdict approve with cosmetic minors only; plan amendment A1 clarifies Task 41 ships verb-form `help <subcommand>` while existing handlers' fs.Usage stays untouched for v0.1)
+42. test/e2e/ helpers package + Task 42a fixture trees (commit `9d7ee87`; SetupUSB / SeedSource / SeedProfile / RunBackup / RunVerify / RunStatus / RunProfiles / RunInit + Assert helpers; binary-build cache via sync.Once per flavour; `test/fixtures/{tiny,realistic,pathological}` with MANIFEST.txt per dir; pathological materialized via `mkfixtures.sh` because NFC/NFD twins + control bytes + sparse + chflags don't survive a generic git checkout; 7 hermetic sanity tests)
 
-**Tasks remaining (17):** 22a + 29a (queued earlier), 42-42a (test/e2e package boundary + fixture trees), 43-52 (e2e tests: init, backup-happy, verify-intact, lock, non-tty, atomic gate, mutation, crash-resume, delete-flag, delete-confirm, fault-kill, AC-19 tamper), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
+**Tasks remaining (16):** 22a + 29a (queued earlier), 43 (e2e init AC-1 + AC-2), 44 (e2e backup-happy AC-3), 45 (e2e verify-intact AC-9 + AC-10), 46 (e2e lock AC-11 + AC-12), 47 (e2e non-tty AC-15), 48 (e2e atomic gate AC-4), 49 (e2e mutation AC-5 + AC-6), 50 (e2e crash-resume AC-13), 51 (e2e delete-flag AC-14), 51a (e2e tampered manifest AC-19), 51b (e2e missing fault hooks per QA hat), 52 (e2e delete-confirm AC-7 + AC-8), 53 (ERROR_CATALOG.md), 54 (README polish), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -83,6 +84,21 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Task 41 review approve + Tasks 42+42a (e2e infra) + 1 more CI rescue
+
+Task 41 review verdict: approve, 3 cosmetic minors (M1 + M2 line/test count drift in brief, M3 helptext.go file-header convention note). Plan amendment A1 applied: master plan Task 41 entry clarifies that v0.1 ships the verb-form `help <subcommand>` reading from `subcommandHelpTexts`, while existing handlers' `fs.Usage` blocks keep providing the `flashbackup <subcommand> --help` path (future refactor may unify). helptext.go file-header now documents the "Use Flags / Actions / Subcommands as appropriate for surface shape" convention (M3).
+
+Task 42 + Task 42a (bundled) shipped commit `9d7ee87`:
+- `test/e2e/` package: doc.go + helpers.go + binary_cache.go + assertions.go + chflags_{darwin,other}.go + helpers_test.go. SetupUSB / SeedSource / SeedProfile / RunBackup / RunVerify / RunStatus / RunProfiles / RunInit / AssertManifestExists / AssertRunsNDJSONHasFinishedLine / AssertVerifySummaryExists exports. Binary-build cache via `sync.Once` per binary flavour (release + faultinject); built tempdir intentionally NOT registered with t.Cleanup so the cached path outlives the originating test (OS reaps on process exit). Repo-root discovery walks up from os.Getwd() looking for go.mod, fallback to $GOMOD env.
+- `test/fixtures/{tiny,realistic,pathological}`: MANIFEST.txt per dir documents file count, sizes, SHA256-of-tree, special-char and edge cases, and which ACs consume the fixture. SHA256-of-tree recipe: concat sorted (path, file bytes) pairs with newline framing between chunks; canonical impl in `FixtureTreeSHA256`, mirrored in `regen-manifest.sh`. Tripwire test `*_MatchesManifest` fires if either side drifts.
+- tiny + realistic are static (checked in); pathological is dynamic via `mkfixtures.sh` because NFC/NFD twins, \x07/\x1b control bytes in filenames, sparse files, and chflags state don't survive a generic git checkout. `SeedSource` dispatches on fixture name and execs the script for pathological.
+- realistic/code/*.txt files contain Go-shaped placeholder source but use `.txt` extension so `go test ./...` and `go vet ./...` skip them.
+- 7 hermetic sanity tests pass; FixtureTreeSHA256 tripwire holds.
+
+CI rescue #3 this session: SA9009 staticcheck (commit `fde74c7`) tripped on a doc comment containing `go:embed)` which staticcheck interpreted as a malformed compiler directive. Rephrased to "a `go embed` directive" (backticked words + space) so the lint sees prose. First exec.Command in cmd/flashbackup (Task 40's profiles) and first prose mention of compiler-directive-shaped strings (Task 41's helptext.go); both are minor pain points of growing a package by accretion.
+
+Commits this segment: `6ebac26` (gosec G204 fix), `3c95586` (BACKLOG through Task 41), `fde74c7` (SA9009 fix), `9d7ee87` (Task 42 + 42a), this commit (Task 41 review A1 + M3 + BACKLOG through Task 42).
 
 ### 2026-06-05 (latest): Tasks 40 review approve + Task 41 (help) + 2 CI rescues
 
