@@ -104,7 +104,7 @@ e2e-fast:
 
 e2e-safety:
 	@if [ -d ./test/e2e ]; then \
-		FLASHBACKUP_E2E=1 go test -timeout=15m -tags faultinject -run "AtomicGate|Mutation|CrashResume|DeleteFlag|DeleteConfirm|TamperedManifest" ./test/e2e/...; \
+		FLASHBACKUP_E2E=1 go test -timeout=15m -tags faultinject -run "AtomicGate|Mutation|CrashResume|DeleteFlag|DeleteConfirm|TamperedManifest|FaultKill|Fault_Unmount|Fault_DiskFull" ./test/e2e/...; \
 	else \
 		echo "skip: ./test/e2e/ does not exist yet"; \
 	fi
