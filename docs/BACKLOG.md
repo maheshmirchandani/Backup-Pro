@@ -2,9 +2,20 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Task 51 + new Task 51c queued)
+## Project status (2026-06-05, after Tasks 50-51 + Task 50 review I1/A1 + new Tasks 50a/50b/51c queued)
 
-**Phase:** Plan 1 execution. Tasks 1-51 complete. Repo public. CI green. e2e tests: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation + crash-resume + delete-flag (AC-13 + AC-14 tests skip with documented architectural gaps; future-state assertions sit below the skip). **New Task 51c queued: wire the `--delete` CLI flag at `cmd/flashbackup/backup.go` AND add a mirror-delete phase function in the runner that consults `opts.Delete`, reconstructs the FB-written-paths set from prior manifests, computes the diff against the current run's manifest, and unlinks the diff under the namespaced dest root while leaving user-added files untouched per invariant #6. The test infrastructure for AC-14 is ready; flipping the skip to assertions requires the producer-side wiring.** Next: Task 51 review + Task 51a (e2e tampered manifest AC-19).
+**Phase:** Plan 1 execution. Tasks 1-51 complete. Repo public. CI green. e2e tests: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation + crash-resume + delete-flag (AC-13a + AC-13b + AC-14 tests skip with documented architectural gaps; future-state assertions sit below the skip).
+
+**Spec AC-13 split per Task 50 review A1:**
+- AC-13a (orphan finalization → crashed_resumed): test exists, skipped pending Task 50a.
+- AC-13b (rsync --partial resume): no test yet; queued as Task 50b (needs >tiny fixture).
+
+**Three new tasks queued:**
+- Task 50a (preflight orphan-recovery gate that finalizes started-without-finished as crashed_resumed).
+- Task 50b (AC-13b rsync --partial resume e2e test with a larger fixture).
+- Task 51c (--delete CLI flag + mirror-delete-DEST runner phase + FB-paths reconstruction).
+
+Next: Task 51 review + Task 51a (e2e tampered manifest AC-19).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
