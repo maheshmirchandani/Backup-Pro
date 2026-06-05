@@ -2,7 +2,11 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 50-51 + Task 50 review I1/A1 + new Tasks 50a/50b/51c queued)
+## Project status (2026-06-05, after Tasks 51a-51b + AC-19 + 4 fault-coverage tests; 4 e2e tests remain in Plan 1)
+
+**Phase:** Plan 1 execution. Tasks 1-51b complete. Repo public. CI green. e2e: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation + crash-resume (gap) + delete-flag (gap) + tampered-manifest + fault-kill (T2 + T3) + unmount + disk-full. Next: Task 51b review + Task 52 (delete-confirm AC-7+AC-8). Then 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+
+## Older status (2026-06-05, after Tasks 50-51 + Task 50 review I1/A1 + new Tasks 50a/50b/51c queued)
 
 **Phase:** Plan 1 execution. Tasks 1-51 complete. Repo public. CI green. e2e tests: init + backup-happy + verify-intact + lock + non-tty + atomic-gate + mutation + crash-resume + delete-flag (AC-13a + AC-13b + AC-14 tests skip with documented architectural gaps; future-state assertions sit below the skip).
 
