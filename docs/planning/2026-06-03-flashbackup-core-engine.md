@@ -441,6 +441,10 @@ Multiple `--inject` flags allowed; applied in order.
 }
 ```
 
+**Optional fields (refined 2026-06-05 per Task 39 review I2 / A1):**
+- `last_run` and `last_verify` are **omitted entirely** when no run or verify has happened on the USB (fresh init).
+- `last_run.profile` is **omitted** when the run had no named profile (ad-hoc invocation). The on-disk `FinishedRun.Profile` already uses `omitempty`; the JSON status surface mirrors that shape.
+
 ### Conventions
 
 - **Go file naming:** `snake_case.go` (Go convention). On-disk state files: `kebab-case.{ndjson,json}` (per spec invariant #45 / project convention).

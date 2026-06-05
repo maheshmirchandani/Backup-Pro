@@ -77,7 +77,7 @@ func countRetainedRuns(dotDir string) int {
 //
 //   - a missing runs.ndjson (fresh USB; no run ever started)
 //   - a runs.ndjson with no `finished` line (every run crashed; legitimate
-//     state — invariant #10 says crashed runs are observable by absence)
+//     state; invariant #10 says crashed runs are observable by absence)
 //   - any per-line parse error during the scan (the entries up to the
 //     error are still considered; state.ReadRunLog accumulates the parse
 //     errors but still returns the entries it could parse)
@@ -125,10 +125,10 @@ func readLastRun(runsNDJSONPath string) *statusLastRun {
 //
 // Discovery strategy: scan <runsDir> for canonical RunID dirs, then under
 // each one scan verifications/ for canonical VerifyID dirs (which share
-// the runIDPattern by design — verify.newVerifyID returns the same shape),
+// the runIDPattern by design; verify.newVerifyID returns the same shape),
 // then attempt to parse summary.json. Pick the candidate with the
 // chronologically-latest VerifiedAt; ties are broken by lexical VerifyID
-// (deterministic but unimportant — a tie within a single second is a
+// (deterministic but unimportant; a tie within a single second is a
 // race that never happens in practice).
 //
 // Why we re-parse summary.json rather than reading a maintained index:

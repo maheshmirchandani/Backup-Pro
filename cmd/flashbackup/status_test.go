@@ -225,7 +225,7 @@ func TestReadLastRun_AbsentFile(t *testing.T) {
 }
 
 // TestReadLastRun_OnlyStarted: a runs.ndjson with only a started line (the
-// run crashed before AppendFinished) returns nil — invariant #10 says
+// run crashed before AppendFinished) returns nil; invariant #10 says
 // crashed runs are observable by absence of a finished line. The next
 // observer (verify, status) treats them as not-yet-completed.
 func TestReadLastRun_OnlyStarted(t *testing.T) {
