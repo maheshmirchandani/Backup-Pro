@@ -405,9 +405,20 @@ func emitSummary(ctx context.Context, r types.Renderer, res *types.RunResult) {
 	if r == nil {
 		return
 	}
+	// UIEvent.Path now carries the EXACT artifact file path the operator
+	// should consult for forensic detail (was previously the run dir, with
+	// the renderer appending "/events.ndjson"). The renderer prints
+	// "details: see <ev.Path>" verbatim. Verify produces summary.json under
+	// a different dir; this contract change lets each producer name its own
+	// artifact instead of the renderer hardcoding "/events.ndjson". Per
+	// Task 38 review I1.
+	artifactPath := ""
+	if res.RunDir != "" {
+		artifactPath = filepath.Join(res.RunDir, "events.ndjson")
+	}
 	_ = r.OnEvent(ctx, types.UIEvent{
 		Kind:      types.UIEvtSummary,
-		Path:      res.RunDir,
+		Path:      artifactPath,
 		Status:    res.ExitStatus,
 		Timestamp: res.FinishedAt,
 	})

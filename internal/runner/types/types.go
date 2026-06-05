@@ -122,12 +122,16 @@ type RunResult struct {
 // UIEvent is renderer-facing and distinct from state.Event (persisted).
 type UIEventKind string
 
-// UIEvtSummary additionally carries the run directory in UIEvent.Path so
-// the renderer can substitute the real path into the "where" line of the
-// three-part summary block (design spec section 6, principle #2: full
-// paths, not relative). Empty Path means the run never got past T0 and
-// the run dir does not exist; renderers should fall back to the
-// placeholder string in that case. Added 2026-06-05 per Task 33 review.
+// UIEvtSummary carries the EXACT artifact file path in UIEvent.Path so
+// the renderer prints "details: see <Path>" verbatim. For backup runs
+// the artifact is events.ndjson under the run dir; for verify the
+// artifact is summary.json under the verifications dir; each producer
+// names its own artifact. Empty Path means no artifact landed (e.g. a
+// T0 failure on the backup side, or a verify All-mode aggregate where
+// no single file represents the batch); the renderer falls back to a
+// generic placeholder pointing at .flashbackup/. Refined 2026-06-05 per
+// Task 38 review I1 (previously Path was the run dir and the renderer
+// appended "/events.ndjson", which was wrong for verify).
 
 const (
 	UIEvtPhaseStarted   UIEventKind = "phase_started"

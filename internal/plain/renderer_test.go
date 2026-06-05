@@ -181,7 +181,7 @@ func TestOnEvent_NonTTY_AllKinds(t *testing.T) {
 			want: "\nRun complete.\n" +
 				"  exit status: ok\n" +
 				"  finished at: 2026-06-05T14:30:00Z\n" +
-				"  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n",
+				"  details: see the <USB>/.flashbackup/ directory\n",
 		},
 		{
 			name: "summary unknown status",
@@ -193,16 +193,18 @@ func TestOnEvent_NonTTY_AllKinds(t *testing.T) {
 			want: "\nRun complete.\n" +
 				"  exit status: (unknown)\n" +
 				"  finished at: 2026-06-05T14:30:00Z\n" +
-				"  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n",
+				"  details: see the <USB>/.flashbackup/ directory\n",
 		},
 		{
-			// Task 33 review M1: when UIEvent.Path carries the real run dir,
-			// the "where" line must substitute it instead of rendering the
-			// literal placeholder. Spec section 6 principle #2.
-			name: "summary with real run dir path",
+			// Task 38 review I1: UIEvent.Path now carries the EXACT artifact
+			// file path the emitter wants the operator to consult. For backup
+			// runs this is events.ndjson; for verify per-run it is
+			// summary.json. The renderer just echoes ev.Path; no
+			// "/events.ndjson" suffix appended.
+			name: "summary with backup events.ndjson artifact path",
 			ev: types.UIEvent{
 				Kind:      types.UIEvtSummary,
-				Path:      "/Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2",
+				Path:      "/Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2/events.ndjson",
 				Status:    "ok",
 				Timestamp: fixedTime,
 			},
@@ -210,6 +212,21 @@ func TestOnEvent_NonTTY_AllKinds(t *testing.T) {
 				"  exit status: ok\n" +
 				"  finished at: 2026-06-05T14:30:00Z\n" +
 				"  details: see /Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2/events.ndjson\n",
+		},
+		{
+			// Task 38 review I1: verify-side summary.json artifact path.
+			// Renderer treats it the same way; no special casing.
+			name: "summary with verify summary.json artifact path",
+			ev: types.UIEvent{
+				Kind:      types.UIEvtSummary,
+				Path:      "/Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2/verifications/2026-06-04T0900Z-c9f4/summary.json",
+				Status:    "ok",
+				Timestamp: fixedTime,
+			},
+			want: "\nRun complete.\n" +
+				"  exit status: ok\n" +
+				"  finished at: 2026-06-05T14:30:00Z\n" +
+				"  details: see /Volumes/USB/.flashbackup/runs/2026-06-05T1430Z-a7f2/verifications/2026-06-04T0900Z-c9f4/summary.json\n",
 		},
 	}
 

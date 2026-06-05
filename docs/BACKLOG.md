@@ -2,9 +2,9 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05, after Tasks 37 + 38 + A1 + A2 + Task 37 review fixes)
+## Project status (2026-06-05, after Tasks 38-39 + Task 38 review I1 fix)
 
-**Phase:** Plan 1 execution. Tasks 1-38 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with pre-T0 DELETE confirmation) + verify (with --all / --check-extras / explicit run-id). `internal/testutil` houses shared hdiutil helpers across 7 test files. Dispatcher uses `subcommandList[].handler` field for scaleable subcommand wiring. Next: Task 38 review + Task 39 implementer (status subcommand with --json schema).
+**Phase:** Plan 1 execution. Tasks 1-39 complete. Repo public. CI green. `cmd/flashbackup` covers init + backup (copy + move with pre-T0 DELETE confirmation) + verify (with --all / --check-extras / explicit run-id) + status (with --json schema). `internal/testutil` houses shared hdiutil helpers. Dispatcher uses `subcommandList[].handler` field. Next: Task 39 review + Task 40 implementer (profiles subcommand: list/new/edit/delete/validate).
 
 **Latent infrastructure debt** (tracked, not blocking):
 - A1: hdiutil + APFS test helpers duplicated across 6 test files (preflight, runner×3, verify, cmd/flashbackup). Extract to `internal/testutil` before Task 38 (verify subcommand) makes copy #7.
@@ -19,7 +19,7 @@
 **Local test sweep at halt time (verified 2026-06-05):**
 `go test -race -count=1 ./...` and `go test -race -count=1 -tags faultinject ./...` both pass across all 17 packages. Coverage holds: runner 83.4%, hash 81.8%, state 83.0%, preflight 84.9%, verify/load 87.7%, verify/rehash 95.9%. All above the 80% gate.
 
-**Tasks complete (38/58):**
+**Tasks complete (39/58):**
 1-10. Foundation (bootstrap, Makefile, paths, hash, state event/manifest/runlog/version, profiles, drives)
 11-20. Integration (selection, rsync embed/wrapper/parser, preflight lock/filesystem/symlink/codesign/volume_uuid, preflight integrate)
 21-22a. Runner types + T0 preflight + Task 22a queued for T0 unowned event Kinds
@@ -34,9 +34,10 @@
 35. cmd/flashbackup init subcommand (commit `3644204`; AC-1 + AC-2; refuses exFAT with reformat recipe; refuses overwrite without `--reset-keys`; rsync.EnsureExtracted wired; 83.1% coverage; review approve with cosmetic doc-step renumbering applied)
 36. cmd/flashbackup backup subcommand (commit `bf99233`; runs runner.Run end-to-end with plain renderer; `--move` gate refused with Task 37 redirect; ExitStatus → process exit code mapping; 80.8% coverage; first commit where verify-release gate has a real positive control; review verdict approve)
 37. cmd/flashbackup backup move-mode DELETE confirmation modal (commit `7123a81`; replaces --move refusal with promptDeleteConfirm; renderer-driven UIEvtPrompt with cmd-composed warning text in ev.Status; case-sensitive exact match against "DELETE"; aborts on lowercase, typo, empty, trailing whitespace, EOF; 78.3% coverage; AC-7 + AC-8; review fixes amended spec section 4 + AC-7 + AC-8 + ExitStatusCopyOnlyAbortedDelete to reflect the pre-T0 gate architecture instead of the originally-specced post-T2 modal; M2 SIGINT comment tightened; M4 `deleteToken` const replaces dead `ev.Path` marker)
-38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 8 unit + 6 e2e tests; cmd/flashbackup coverage 79.0%)
+38. cmd/flashbackup verify subcommand + A1 testutil extraction + A2 dispatcher handler-field refactor (3 commits: `db6972a` testutil, `8dc7de3` handler-field, `4dfe3ca` verify; verify wires internal/verify.Verify with --all / --check-extras / explicit run-id; AC-9 + AC-10 + AC-19; 14 tests; cmd/flashbackup coverage 87.1%; review verdict approve with one important I1: renderer summary "details: see" line was wrong for verify — fixed by switching UIEvent.Path semantics from "run dir" to "exact artifact file path" so each producer names its own artifact)
+39. cmd/flashbackup status subcommand with --json (commit `4f69943`; locked JSON schema per API Contracts; tabular plain text default; last_run from runs.ndjson scan; last_verify from scan-and-pick-newest by VerifiedAt; lock status via stat; 26 tests; cmd/flashbackup coverage 73.6%)
 
-**Tasks remaining (20):** 22a (queued; unowned T0 events), 29a (queued; PreflightContext test injection), 39 (status subcommand), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
+**Tasks remaining (19):** 22a + 29a (queued earlier), 40 (profiles subcommand), 41 (help subcommand), 42-42a (e2e helpers + fixtures), 43-52 (e2e tests), 51a-51b (AC-19 tamper + missing fault hooks), 53 (ERROR_CATALOG), 54 (README), 55 (v0.1.0-core tag).
 
 **Plans:**
 - `docs/planning/2026-06-03-flashbackup-core-engine.md` (Plan 1, ~2500 lines, ~58 tasks)
@@ -80,6 +81,23 @@
 - Project not yet under version control. Recommend `git init` before any implementation work begins.
 
 ## History (newest first)
+
+### 2026-06-05 (latest): Tasks 38 review + Task 39 (status) + UIEvent.Path artifact-path refinement
+
+Task 38 review verdict: approve with one important I1 — the plain renderer's summary block emitted `details: see <RunDir>/events.ndjson` (Task 33 review M1 had set up Path = run dir + renderer appends "/events.ndjson"); verify writes `summary.json` under `<verifyDir>/`, NOT `events.ndjson` at the run root. So `flashbackup verify <USB>` ended its plain-text output with a "details: see..." line pointing at a file that didn't exist.
+
+Fix applied inline: switched `UIEvent.Path` semantics from "run dir" to "exact artifact file path." Each producer now names its own artifact: `runner.Run` sets `<runDir>/events.ndjson`, `verify.Verify` sets `<verifyDir>/summary.json` (new `VerifyResult.SummaryPath` field captures it from `verifyOneRun` after the successful summary write). Renderer prints `details: see <ev.Path>` verbatim with no suffix append. Empty `Path` falls back to a generic `details: see the <USB>/.flashbackup/ directory` placeholder for All-mode aggregates and pre-pipeline error paths.
+
+Two new renderer tests lock both shapes (backup artifact `.../events.ndjson` + verify artifact `.../summary.json`). Plan amendment to Task 33 entry + types.UIEvtSummary doc both updated to reflect the artifact-path contract.
+
+Other Task 38 review findings:
+- M1 (test count drift in commit message): cosmetic, skipped.
+- M2 (A1 commit message says 6 files; actually 7): cosmetic, skipped.
+- M3 (2 non-mount test files still have local requireMacOS + requireDiskutil): out of A1 scope; can adopt testutil exports in a future cleanup pass.
+
+Task 39 (`cmd/flashbackup/status.go` + `status_helpers.go`) shipped commit `4f69943`: surfaces USB state per the locked API Contracts JSON schema (`--json`) and a 2-column tabular plain-text default. last_run sourced from the latest `finished` line in `runs.ndjson`; last_verify sourced from scan-and-pick-newest by VerifiedAt across all `<DotDir>/runs/*/verifications/*/summary.json` files (cost bounded by retention limit; documented as the future trigger for a maintained index if perf becomes a problem). Lock detection is stat-only (not Acquire) since status is a read-only view; presence of `<DotDir>/lock` means held. Byte formatting via explicit decimal SI helper (`humanizeBytes`); JSON keeps raw bytes. Empty-state handling: `LastRun` and `LastVerify` are pointer + omitempty so a fresh USB drops both keys; plain renderer prints `(none yet)`. 26 tests (21 unit + 5 e2e); cmd/flashbackup coverage 73.6% (above 70% bar).
+
+Commits this segment: `4f69943` (Task 39 status), this commit (Task 38 review I1 + plan/spec amendments + BACKLOG/memory through Task 39).
 
 ### 2026-06-05 (latest): Task 37 review + Task 38 + A1 + A2
 

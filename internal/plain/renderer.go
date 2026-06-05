@@ -268,14 +268,19 @@ func (r *plainRenderer) writeSummary(ev types.UIEvent) error {
 	// Single fmt.Fprintf so the whole block lands as one write call;
 	// holding mu prevents interleaving with other emitters even if the
 	// underlying Writer is itself unbuffered.
-	// Substitute the real run dir into the "where" line when the emitter
-	// supplied it (UIEvent.Path; see types.UIEvtSummary doc). Falls back to
-	// the literal placeholder when Path is empty (e.g., a T0 failure that
-	// never produced a run dir). Spec section 6 principle #2 (full paths,
-	// not relative) is satisfied whenever the run got past T0.
-	detailsLine := "  details: see <USB>/.flashbackup/runs/<RunID>/events.ndjson\n"
+	// UIEvent.Path carries the exact artifact file path the operator
+	// should consult (events.ndjson for backup runs, summary.json for
+	// verify per-run, etc.). Each producer names its own artifact so the
+	// renderer does not have to know whether this is a backup or verify
+	// summary. Per Task 38 review I1 (2026-06-05); previous contract was
+	// "Path = run dir, renderer appends /events.ndjson" which was wrong
+	// for verify. Falls back to a generic ".flashbackup/" pointer when
+	// Path is empty (e.g., a T0 failure that never produced a run dir,
+	// or a verify All-mode aggregate where no single artifact represents
+	// the batch).
+	detailsLine := "  details: see the <USB>/.flashbackup/ directory\n"
 	if ev.Path != "" {
-		detailsLine = fmt.Sprintf("  details: see %s/events.ndjson\n", ev.Path)
+		detailsLine = fmt.Sprintf("  details: see %s\n", ev.Path)
 	}
 	block := prefix +
 		"\n" +

@@ -134,6 +134,13 @@ type VerifyResult struct {
 	DurationSeconds      int
 	BytesRead            int64
 	ExitStatus           string
+
+	// SummaryPath is the absolute on-disk path of the just-written
+	// summary.json. Threaded into UIEvtSummary.Path so the renderer can
+	// surface the exact artifact the operator should consult (per Task 38
+	// review I1). Empty for All-mode aggregate (no single artifact
+	// represents the batch) and for the pre-pipeline error paths.
+	SummaryPath string
 }
 
 // summaryRecord is the on-disk shape persisted at
@@ -426,6 +433,11 @@ func verifyOneRun(ctx context.Context, in oneRunInputs) (*VerifyResult, error) {
 	if writeErr := writeSummaryFile(verifyDir, in.runID, verifyID, runResult); writeErr != nil {
 		return runResult, fmt.Errorf("write summary: %w", writeErr)
 	}
+	// Task 38 review I1: thread the just-written summary.json path into
+	// VerifyResult so the terminal UIEvtSummary can point the operator
+	// at the right artifact. Only set on the success-write path; an
+	// error above means the file may be torn or absent.
+	runResult.SummaryPath = filepath.Join(verifyDir, summaryFilename)
 
 	// 6. Surface the deferred rehash cancellation error (if any) AFTER
 	// the summary record is on disk. The partial counters are still
@@ -761,8 +773,15 @@ func emitSummary(ctx context.Context, r types.Renderer, res *VerifyResult) {
 	if r == nil {
 		return
 	}
+	// Path = the just-written summary.json absolute path when present;
+	// empty for All-mode aggregate (multiple summaries exist; no single
+	// file represents the batch) and for early-error paths that abort
+	// before any summary lands. Renderer prints "details: see <Path>"
+	// when non-empty, falls back to a generic ".flashbackup/" pointer
+	// when empty. Per Task 38 review I1.
 	_ = r.OnEvent(ctx, types.UIEvent{
 		Kind:      types.UIEvtSummary,
+		Path:      res.SummaryPath,
 		Status:    res.ExitStatus,
 		Timestamp: time.Now().UTC(),
 	})
