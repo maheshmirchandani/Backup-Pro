@@ -96,7 +96,16 @@ func run(ctx context.Context, argv []string, stdout, stderr io.Writer) int {
 	}
 
 	for _, sc := range subcommandList {
-		if sc.name == arg {
+		if sc.name != arg {
+			continue
+		}
+		switch sc.name {
+		case "init":
+			// Task 35: real implementation. argv[2:] drops the program
+			// name and the subcommand so runInit sees only its own
+			// positional path + flags.
+			return runInit(ctx, argv[2:], stdout, stderr)
+		default:
 			return dispatchStub(ctx, sc.name, sc.task, stderr)
 		}
 	}

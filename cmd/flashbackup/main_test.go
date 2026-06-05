@@ -130,12 +130,24 @@ func TestRun_UnknownSubcommand(t *testing.T) {
 }
 
 // TestRun_KnownStubSubcommand: every known subcommand from subcommandList
-// returns the not-implemented stub (exit 2, message names the task). This
-// is the contract that Tasks 35-41 will REPLACE; this test deliberately
-// asserts on the stub message so each future task gets a failing test that
-// points the implementer at the right replacement site.
+// that has NOT yet been replaced returns the not-implemented stub (exit 2,
+// message names the task). This is the contract that Tasks 35-41 REPLACE
+// in turn; this test deliberately asserts on the stub message so each
+// future task gets a failing test that points the implementer at the
+// right replacement site.
+//
+// Subcommands already replaced (real implementation in place) are listed
+// in replacedSubcommands and skipped here; their own *_test.go files
+// own the real-behaviour assertions. Update both that set and the
+// dispatcher when a task lands.
 func TestRun_KnownStubSubcommand(t *testing.T) {
+	replacedSubcommands := map[string]bool{
+		"init": true, // Task 35; see init_test.go
+	}
 	for _, sc := range subcommandList {
+		if replacedSubcommands[sc.name] {
+			continue
+		}
 		t.Run(sc.name, func(t *testing.T) {
 			code, stdout, stderr := runCapture(t, []string{"flashbackup", sc.name})
 			if code != 2 {
