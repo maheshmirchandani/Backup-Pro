@@ -145,21 +145,23 @@ Witness-Announce: <sha256> (rsync-announce 3.4.1 mail thread) observed YYYY-MM-D
 
 A CI lint job (`actions-lint` workflow, Section 5.4) fails if the attestation file is missing, mismatched, or older than 90 days from the `rsync.version` modification date.
 
-**Primary download channel: GitHub mirror.** Once the constant is verified, the tarball is uploaded once as a permanent GitHub Release artifact of flashbackup itself, at a never-changing tag `upstream-mirror/rsync-3.4.1`:
+**Primary download channel: GitHub mirror.** Once the constant is verified, the tarball is uploaded once as a permanent GitHub Release artifact of flashbackup itself, at a never-changing tag `upstream-mirror-rsync-3.4.1` (single-segment tag; hyphen separator, not slash, to avoid URL-parsing ambiguity per round-2 DevOps M3):
 
 ```bash
-PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror/rsync-3.4.1.tar.gz"
+PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror-rsync-3.4.1/rsync-3.4.1.tar.gz"
 FALLBACK_URL="https://download.samba.org/pub/rsync/src/rsync-3.4.1.tar.gz"
 ```
 
 Both URLs serve identical bytes (SHA-pinned). Primary insulates us from samba.org outages at release time. Fallback handles the case where flashbackup's GitHub assets are unreachable.
 
-**Bootstrap procedure (round-2 DevOps I1 fix):** the very first release cannot use the GitHub mirror because the `upstream-mirror/rsync-3.4.1` tag does not yet exist. Documented procedure for first-release bootstrap:
+**Bootstrap procedure (round-2 DevOps I1 + plan-review I2/I3 fix):** the very first release cannot use the GitHub mirror because the `upstream-mirror-rsync-3.4.1` tag does not yet exist. Documented procedure for first-release bootstrap:
 
 1. After populating `rsync.version` + `rsync.version.attestation`, manually download the tarball from samba.org.
-2. Run `./scripts/build-rsync.sh --verify-only` (a new mode that downloads + verifies SHA but skips build). Confirm SHA matches all three witnesses.
-3. Manually create GitHub Release `upstream-mirror/rsync-3.4.1` and upload the verified tarball.
-4. Subsequent releases use `PRIMARY_URL` automatically. This bootstrap is a one-time-per-version step (re-runs only on rsync version bumps).
+2. Run `./scripts/build-rsync.sh --verify-only` to confirm the SHA matches the pin.
+3. **Re-verify the cache from a second network path** (e.g. a different ISP, or `curl` from a tethered phone) and assert byte-for-byte equality. This defeats the "samba.org compromised at bootstrap moment + attestation written from same compromised state" attack chain.
+4. Manually create GitHub Release at tag `upstream-mirror-rsync-3.4.1` with flags `--prerelease --latest=false` (prevents the mirror release from shadowing real product releases) and upload the verified tarball.
+5. Verify the uploaded asset's SHA via `gh release view upstream-mirror-rsync-3.4.1` matches; for paranoia, fetch from `PRIMARY_URL` via a SECOND session/network and SHA-check again.
+6. Subsequent releases use `PRIMARY_URL` automatically. This bootstrap is a one-time-per-version step.
 
 This procedure lives in `docs/runbooks/rsync-version-bump.md` (Task 12d, §9.1).
 
@@ -274,7 +276,7 @@ on_error() {
 }
 
 # --- upstream URLs ---
-PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror/rsync-${RSYNC_VERSION}.tar.gz"
+PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror-rsync-${RSYNC_VERSION}/rsync-${RSYNC_VERSION}.tar.gz"
 FALLBACK_URL="https://download.samba.org/pub/rsync/src/rsync-${RSYNC_VERSION}.tar.gz"
 
 # --- download + verify (curl diagnostics NOT suppressed per round-2 Senior Dev I2) ---
@@ -399,7 +401,8 @@ main "$@"
 #   3. Update scripts/rsync.version.attestation with three witness SHAs
 #      observed within 90 days of this edit.
 #   4. Run scripts/build-rsync.sh --verify-only locally to confirm.
-#   5. Upload tarball to upstream-mirror/rsync-X.Y.Z Release.
+#   5. Upload tarball to upstream-mirror-rsync-X.Y.Z Release with
+#      --prerelease --latest=false flags.
 #   6. Commit + push; CI lint enforces attestation freshness.
 RSYNC_VERSION=3.4.1
 RSYNC_TARBALL_SHA256=<populated at implementation time>
@@ -599,7 +602,7 @@ jobs:
 
 **Cache write scoping** (round-2 DevOps M7 clarification): `actions/cache@v4` has built-in protection — PRs from forks can read but not write to the cache. The `if: github.ref == 'refs/heads/main'` belt-and-suspenders mentioned in earlier drafts is unnecessary; removed.
 
-**Bootstrap procedure for `upstream-mirror/<version>` GitHub Release:** see `docs/runbooks/rsync-version-bump.md` (Task 12d, §9.1).
+**Bootstrap procedure for `upstream-mirror-<version>` GitHub Release:** see `docs/runbooks/rsync-version-bump.md` (Task 12d, §9.1).
 
 **Plan 2 release-pipeline restructure (round-2 Tech Lead Important 1):**
 
@@ -731,7 +734,7 @@ Five concerns from rounds 1 + 2 do not belong in 12a but must not be lost. Each 
 
 2. **Task 12d — Release + rollback + version-bump runbooks** (round-2 DevOps I3 + bootstrap procedure).
    - Deliverable: `docs/runbooks/release-cut.md`, `docs/runbooks/rsync-version-bump.md`, `docs/runbooks/sev1-rollback.md`.
-   - Content: MM-side procedure for tag → CI approve → draft verify → publish; first-release bootstrap of `upstream-mirror/<version>` GitHub Release; Sev1-within-hour rollback (un-publish draft, delete release, yank tag, post-mortem).
+   - Content: MM-side procedure for tag → CI approve → draft verify → publish; first-release bootstrap of `upstream-mirror-<version>` GitHub Release; Sev1-within-hour rollback (un-publish draft, delete release, yank tag, post-mortem).
    - Target landing: 2026-06-12 (before Phase 0 gate close).
 
 3. **Reproducible builds.** Section 8.1 + 8.2 document the asymmetry honestly. Deep-dive (SOURCE_DATE_EPOCH, trimpath, multi-builder cross-check) deferred to Plan 2+.
