@@ -2,7 +2,23 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-05 evening): Phase 0 dogfood session 1 surfaced Task 12a as the blocker
+## Project status (2026-06-06 evening): Task 12a spec FINAL; plan v1 reviewed; plan v2 rewrite pending
+
+**Phase:** Plan 1.5 prep. Task 12a brainstorm + 3-round spec review + plan v1 + plan-review all shipped this session. **Plan v2 NOT YET WRITTEN.** That's the next-session pickup.
+
+**Spec status (LOCKED):** `docs/specs/2026-06-06-1839-task-12a-embedded-rsync-build-pipeline-design.md`. Commits `f35a7ef` (v3 post-round-2-review) + `418d8e2` (GitHub release URL format fix). Two multi-hat review rounds completed (5 hats round 1; 6 hats round 2 including fresh Tech Lead).
+
+**Plan v1 status (HAS KNOWN BUGS):** `docs/planning/2026-06-06-1917-task-12a-embedded-rsync-build-pipeline.md`. Commit `a77c95b`. 12 tasks, 1660 lines. Plan-review (4 hats: Senior Dev + DevOps + QA + CISO/Hacker re-check) found 14 Critical + 20 Important + 15 Minor. Cross-cutting Critical: helper signature mismatches with actual `test/e2e/helpers.go` API (BuildBinary, RunBackup, RunInit, SeedProfile, paths.Namespaced, repoRoot, t.Context) — plan v1 generated pseudo-code without reading the actual files.
+
+**Plan v2 scope (next-session pickup):** rewrite Tasks 5+6 using actual helper signatures (verified by reading code); fix workflow ordering (Task 9 PR-gate + dispatch-before-merge); harden security gates (parse-don't-source regex strengthening, pre-commit grep for `<PINNED_SHA` literals, `gh api` environment verification); fix mkfixtures.sh nondeterminism (no `$(date +%s)`, no `$(whoami)` baked into fixture content); standardize pre-commit gate language (run gates for ALL commits); split Task 1 Step 1.4 into 5 sub-steps; misc Important findings. Memory file has the full list at `project_execution_state.md`.
+
+**Spec change folded in via 418d8e2:** GitHub release tag renamed from `upstream-mirror/rsync-3.4.1` (slash, ambiguous URL parsing) to `upstream-mirror-rsync-3.4.1` (single-segment hyphen form). PRIMARY_URL now correctly composes `.../releases/download/<tag>/<filename>`. Bootstrap procedure tightened with second-network re-verify + post-upload SHA cross-check.
+
+**Tasks queued for 2026-06-12 (before Phase 0 gate close on 2026-06-19):** Task 12c (CVE posture stub), Task 12d (release + rollback + rsync-version-bump runbooks). Tracker dates land in spec §9.1 + slip-indicators surface to MM if missed.
+
+**Phase 0 dogfood remains paused** until plan v2 lands and Task 12a actually ships a working `make build-real-rsync`. v0.1.0-core binary still cannot back up data on a clean install; env override via `FLASHBACKUP_RSYNC_PATH_FOR_TEST` continues to be the dogfood workaround for engine validation.
+
+## Older project status (2026-06-05 evening): Phase 0 dogfood session 1 surfaced Task 12a as the blocker
 
 **Phase:** Plan 1.5 prep. Phase 0 dogfood session 1 (1920 to 2030 local) ran on MM's M1 Max + ROCKET-2TB USB. **First real backup revealed the embedded rsync is the Task 12a placeholder stub:** the binary at `internal/rsync/bin/rsync.placeholder` prints "PLACEHOLDER rsync; awaiting Task 12a build" and exits 0. Engine reports T1 OK because rsync exit-code-only check passes; T2 hash-compare tags all files `not_transferred`; final exit `partial`. **No data loss** (copy mode; would have been blocked by atomic gate in move mode anyway). CI never caught this because every e2e test sets `FLASHBACKUP_RSYNC_PATH_FOR_TEST=/opt/homebrew/bin/rsync`; the placeholder code path is not exercised end-to-end.
 
