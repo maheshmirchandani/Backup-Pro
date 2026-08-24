@@ -510,7 +510,7 @@ Raised during multi-hat review but consciously deferred to Plan 2 or v0.2:
 - [ ] **Step 1: Initialize git + Go module**
 
 ```bash
-cd /Users/maheshm/Documents/1-AI-Projects/Utilities/Backup-Mac  # local repo root (local dir kept as Backup-Mac; GitHub repo is Backup-Pro)
+cd /Users/maheshm/1-AI-Projects/Utilities/Backup-Mac  # local repo root (local dir kept as Backup-Mac; GitHub repo is Backup-Pro)
 git init -b main
 git remote add origin https://github.com/maheshmirchandani/Backup-Pro.git
 go mod init github.com/maheshmirchandani/Backup-Pro

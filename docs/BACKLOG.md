@@ -2,7 +2,43 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (2026-06-06 evening): Task 12a spec FINAL; plan v1 reviewed; plan v2 rewrite pending
+## Project status (Sun, 24 Aug 2026): resumed after 79 days dormant; tree verified healthy; docs de-rotted; plan v2 in progress
+
+**Phase:** Plan 1.5 prep. Unchanged in substance from Sat, 06 Jun 2026: Task 12a spec is locked, plan v1
+is superseded, plan v2 is the active work. Nothing was committed between Sat, 06 Jun 2026 and today.
+
+**Dormancy consequences, recorded so they are not rediscovered later:**
+- 79 days between the last commit (`a12158e`, Sat, 06 Jun 2026) and this session.
+- The Phase 0 dogfood gate targeted Fri, 19 Jun 2026 and is 66 days past. Two backup runs are logged
+  against a 50-run gate, and both used the env override, so they do not count. Phase 0 restarts from
+  zero once Task 12a ships.
+- Tasks 12c and 12d were scheduled for Fri, 12 Jun 2026. Both slipped and remain queued.
+- CI last ran Fri, 05 Jun 2026 (green at `27558c9`). Every commit since has been docs-only and
+  therefore `paths-ignore`d, so the pipeline has been unexercised for 79 days.
+- `golangci-lint` is pinned at 1.61.0, which was already unrunnable against the local Go toolchain in
+  June and is now further behind. Expect friction on the first CI-touching commit.
+
+**Health verification run this session (all green):**
+- `go build ./...` and `go vet ./...` clean under Go 1.26.5, against a `go.mod` floor of 1.23.
+- `go test -count=1 ./...`: 21 packages `ok`.
+- `make e2e-fast`: ok, 30.3s. `make e2e-safety`: ok, 24.8s.
+- `make coverage`: runner 83.2%, hash 81.8%, state 83.0%, preflight 84.9%. All above the 80% gate.
+- Positive control on the e2e gate: `TestE2E_BackupHappy_CopyMode` skips silently without
+  `FLASHBACKUP_E2E=1` and passes in 5.7s with it. A bare `go test ./test/e2e/...` proves nothing.
+
+**Documentation rot corrected this session:**
+- `CLAUDE.md` still declared the project "Pre-implementation, design in progress. No source code, no
+  git, no build system, no test suite yet" against roughly 37,000 lines of Go, a tagged release, a
+  Makefile and a five-job CI pipeline. It also cited 23 locked invariants where the design spec
+  carries 58. Rewritten in full: real build and test commands, test prerequisites, a silent-failure
+  modes section, platform notes, repository layout, and the Task 12a blocker stated plainly.
+- `docs/BACKLOG.md` "Open items" still listed the seven pre-spec workflow steps as outstanding, all
+  completed during Plan 1, and "Cleanup / housekeeping" still recommended `git init`. Both replaced.
+
+**Unchanged blocker:** the embedded rsync is still the placeholder. `v0.1.0-core` cannot back up data
+on a clean install. Task 12a plan v2 is the immediate next artefact.
+
+## Older project status (2026-06-06 evening): Task 12a spec FINAL; plan v1 reviewed; plan v2 rewrite pending
 
 **Phase:** Plan 1.5 prep. Task 12a brainstorm + 3-round spec review + plan v1 + plan-review all shipped this session. **Plan v2 NOT YET WRITTEN.** That's the next-session pickup.
 
@@ -160,19 +196,35 @@ Next: Task 51 review + Task 51a (e2e tampered manifest AC-19).
 
 ## Open items (ordered by priority)
 
-1. **Spec-development-discipline retrofit.** Apply 12-section structure per global CLAUDE.md (hypotheses, wedge analysis, locked decisions, behavioral principles, trust signals, cheap-now-expensive-later, audit abstraction, test pyramid, SLOs, acceptance criteria, etc.). Non-negotiable for substantial specs.
-2. **Spec self-review.** Placeholder scan, internal consistency, scope check, ambiguity check.
-3. **User review of finalized spec.** MM reads and approves or requests changes.
-4. **Full multi-hat review.** Per global CLAUDE.md menu (CTO, Enterprise Architect, BA, CIO, CISO, Hacker, UX, DevOps/SRE, DPO, QA, End User). Subagent-driven, parallel. Apply approved amendments to spec.
-5. **Transition to writing-plans skill.** Generate implementation plan from approved spec.
-6. **Multi-hat review of implementation plan** (CISO, Hacker, DevOps/SRE, QA, Senior Developer, DX). Apply amendments.
-7. **Subagent-driven implementation** via `superpowers:subagent-driven-development`.
+1. **Task 12a plan v2.** Rewrite from the locked spec with helper signatures quoted from the actual
+   files. Blocks everything below.
+2. **Multi-hat review of plan v2** (CISO, Hacker, DevOps/SRE, QA, Senior Developer, DX), then apply
+   amendments.
+3. **Execute Task 12a + 12b** via `superpowers:subagent-driven-development`.
+4. **Task 12c** (CVE posture stub) and **Task 12d** (release, rollback and rsync-version-bump
+   runbooks). Originally scheduled Fri, 12 Jun 2026; both slipped.
+5. **Re-run Phase 0 dogfood from zero** once a real embedded rsync ships. The two logged runs used
+   the env override and do not count towards the 50-run gate.
+6. **Queued follow-ups**, none blocking: 22a, 29a, 50a, 50b, 51c, PA-1, PA-2. Detail in the History
+   section below.
+7. **Cosmetic defects from dogfood session 1**, unfixed: APFS free space reports 0 B (likely
+   `statfs.f_bfree` where it should be `f_bavail`); verify renderer summary `details:` falls back to a
+   generic path instead of the specific `summary.json`; `duration_seconds` truncates sub-second
+   verifies to 0.
+
+The pre-implementation checklist that used to sit here (spec-discipline retrofit, spec self-review,
+multi-hat review, writing-plans, plan review, subagent execution) completed during Plan 1 and has been
+removed.
 
 ## Cleanup / housekeeping
 
-- Original `Portable macOS Backup Utility.txt` archived to `docs/archive/2026-06-03-portable-macos-backup-utility-original.txt` for historical record. Canonical PRD is now `docs/specs/2026-06-03-1338-flashbackup-prd.md`.
-- `.superpowers/` directory in repo root holds visual companion mockups. Add to `.gitignore` once the repo is git-initialized.
-- Project not yet under version control. Recommend `git init` before any implementation work begins.
+- The repository is under version control and public at
+  `https://github.com/maheshmirchandani/Backup-Pro`. `v0.1.0-core` is tagged at `b39a11c`.
+- `.superpowers/` is in `.gitignore`.
+- Original PRD archived at `docs/archive/2026-06-03-portable-macos-backup-utility-original.txt`.
+  Canonical PRD is `docs/specs/2026-06-03-1338-flashbackup-prd.md`.
+- `golangci-lint` is pinned to 1.61.0, which predates the local Go toolchain and cannot run locally.
+  Revisit the pin the next time CI is touched.
 
 ## History (newest first)
 
