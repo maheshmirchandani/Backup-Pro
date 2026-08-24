@@ -30,3 +30,7 @@ testdata/benchmarks-*.txt
 
 # macOS Finder
 .DS_Store
+
+# Task 12a: generated rsync payload + its build tree (root-anchored).
+/build/
+internal/rsync/bin/rsync.universal2

@@ -3,7 +3,6 @@ package rsync
 import (
 	"context"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -13,15 +12,11 @@ import (
 	"github.com/maheshmirchandani/Backup-Pro/internal/hash"
 )
 
-// embeddedRsync is the raw payload built into the flashbackup binary.
-// In Plan 1 / Task 12 this is a small shell-script placeholder
-// (`bin/rsync.placeholder`). Task 12a's scripts/build-rsync.sh will replace
-// the embedded file with a universal2 GNU rsync 3.4.1 binary; no Go-side
-// change is required at that swap since EmbeddedSHA256 recomputes from the
-// new bytes.
-//
-//go:embed bin/rsync.placeholder
-var embeddedRsync []byte
+// embeddedRsync is declared in embed_dev.go (default, placeholder) or
+// embed_release.go (-tags embed_real_rsync, real universal2 rsync). The two
+// files carry mutually exclusive build constraints, so exactly one
+// declaration is in scope at compile time. EmbeddedSHA256 recomputes from
+// whichever payload was selected, so nothing else in this file changes.
 
 var (
 	embeddedHashOnce sync.Once
