@@ -36,7 +36,30 @@ is superseded, plan v2 is the active work. Nothing was committed between Sat, 06
   completed during Plan 1, and "Cleanup / housekeeping" still recommended `git init`. Both replaced.
 
 **Unchanged blocker:** the embedded rsync is still the placeholder. `v0.1.0-core` cannot back up data
-on a clean install. Task 12a plan v2 is the immediate next artefact.
+on a clean install.
+
+**Task 12a plan v2 WRITTEN** (this session): `docs/planning/2026-08-24-1729-task-12a-embedded-rsync-build-pipeline-v2.md`.
+13 tasks, 81 steps. Supersedes plan v1, which is retained as history. Status: draft, pending multi-hat
+plan review. Not yet executed.
+
+Plan v2 is grounded rather than recalled: every helper signature was copied from the file it lives in,
+and the Task 12b-A contract was verified by running a throwaway probe against a real APFS volume before
+the test was specified. Seven deviations from the locked spec are recorded in the plan's self-review
+for MM to rule on at review. The two that matter:
+
+- **`bytes_transferred` does not exist.** AC-12b-1 and AC-12b-2 both assert against it.
+  `internal/state/runlog.go:28-46` defines `BytesTotal` (the enumerated count, non-zero even when
+  nothing transfers) and no transferred counter. The plan substitutes `files_succeeded` and
+  `files_failed` assertions.
+- **The pathological fixture tripwire test does not exist.** Spec 4.5 says Task 42a introduced it; it
+  did not. `MANIFEST.txt` records a `SHA256-of-tree` that nothing asserts. That recorded value is
+  currently correct (reproduced exactly on Sun, 24 Aug 2026), so the plan adds the missing test rather
+  than re-baselining one.
+
+Also found while planning: the new `actions-lint` workflow would have turned main red on landing,
+because `.github/workflows/ci.yml` carries eleven floating `@v4`/`@v5` action references. Plan v2
+pins them one task earlier than the lint that enforces them. All six required action SHAs are
+resolved in the plan as real commit objects, so no `<PINNED_SHA>` placeholder ships.
 
 ## Older project status (2026-06-06 evening): Task 12a spec FINAL; plan v1 reviewed; plan v2 rewrite pending
 
