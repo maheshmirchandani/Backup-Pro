@@ -2,7 +2,69 @@
 
 > Rolling log of design decisions, open items, and historical context for the FlashBackup project. Updated as the project evolves. Lives at `docs/BACKLOG.md`.
 
-## Project status (Sun, 24 Aug 2026): resumed after 79 days dormant; tree verified healthy; docs de-rotted; plan v2 in progress
+## Project status (Mon, 24 Aug 2026): THE PRODUCT WORKS. Embedded rsync landed; spec v4 corrects seven errors
+
+**Phase: Task 12a substantially DONE.** FlashBackup backs up data on a clean install for the first
+time in the project's existence.
+
+**Verified end to end on Mon, 24 Aug 2026** against a real APFS volume with NO
+`FLASHBACKUP_RSYNC_PATH_FOR_TEST` override (commit `050e623`):
+
+| Check | Result |
+|---|---|
+| `flashbackup backup` | exit 0, `exit status: ok`, 3/3 files `verified` |
+| Content equality | 3/3 match, source and destination hashed independently |
+| `diff -rq` | no differences |
+| xattr `user.flashbackup-test` | survived to destination |
+| `flashbackup verify` | exit 0 |
+| `otool -L`, both slices | `/usr/lib/libSystem.B.dylib` alone |
+| Build wall-clock, clean state | 1m15s, inside the AC-12a-1 five-minute target |
+
+AC-12a-2, 12a-3, 12a-4 and 12a-9 satisfied and verified.
+
+**Seven-hat review of plan v2 (CISO, Hacker, DevOps/SRE, QA, Senior Developer, DX, Musk persona).**
+All seven concluded plan v2 was not executable. More importantly, they found the LOCKED SPEC asserts
+things about the build that are not true. Spec v4 at
+`docs/specs/2026-08-24-1830-task-12a-embedded-rsync-build-pipeline-design-v4.md` (commit `f38dcd9`)
+corrects seven factual errors; v3 is marked superseded and retained.
+
+Two of those errors were undiscoverable without compiling rsync, which no review round had ever done.
+The spec passed two multi-hat rounds (eleven hats) plus a four-hat plan review, and every round
+reasoned about the build rather than running it. **That is the process lesson of this session.**
+
+**Product defects surfaced by the review, none of them planning artefacts:**
+- **Task 12f (ACLs are silently dropped).** `BuildArgs` never emits `--acls`; `-a` is `-rlptgoD` and
+  does not carry them. Every backup FlashBackup has ever taken has discarded ACLs. Needs a product
+  decision, not a test change.
+- **Task 12g (a corrupted extraction wedges the USB permanently).** `EnsureExtracted` sets
+  `UF_IMMUTABLE` and no production code ever clears it. Verified: `rename` and `unlink` both fail on
+  a `uchg` target, so the re-extract path is unreachable and `rm -rf` also fails. Attacker-reachable
+  denial of service against a stick, and it worsens now the payload is 1-2 MB rather than 342 bytes.
+- **Task 12e (`bytes_transferred` is computed then discarded).** The value exists at
+  `t2_transfer.go:93` and is dropped in `runner.go` before serialisation. Four lines to plumb through.
+  Had it been present, the placeholder defect would have been obvious as `bytes_transferred: 0` in
+  the first dogfood run instead of needing a physical USB stick to find.
+
+**OUTSTANDING BEFORE ANY RELEASE:**
+1. **Triple-witness attestation has NOT been run.** `scripts/rsync.version` carries a SHA from a
+   single download; `scripts/rsync.version.attestation` does not exist. Spec section 4.4 protocol is
+   unperformed. Do not cut a release from this pin.
+2. Plan v2 needs rewriting against spec v4, or discarding in favour of a much smaller plan. It is
+   superseded in substance by this session's work on Tasks 3 and 5.
+3. Makefile targets (`build-rsync`, `build-real-rsync`, `clean-rsync`, the two test targets) are NOT
+   yet added. The script is invoked directly today.
+4. Tasks 12b-A and 12b-B (the regression tests) are NOT written. Note the review's finding that
+   `e2e-fast`'s `-run` regex would not have matched them anyway, so they must be wired into CI
+   explicitly or they will sit invisible exactly like the bug they guard against.
+5. Tasks 12c and 12d remain overdue since Fri, 12 Jun 2026.
+
+**Open architectural question, raised by the persona hat and not yet answered:** why is there an
+rsync in this product at all? The engine already enumerates, hashes both sides and deletes sources
+itself, and macOS `copyfile(3)` preserves xattrs and ACLs natively. Deleting rsync would delete the
+build pipeline, the GPLv3 conveyance obligation and the CVE surface. It collides with a locked
+invariant and nobody has costed the Go-native alternative. Worth one hour before more is built here.
+
+## Older project status (Sun, 24 Aug 2026): resumed after 79 days dormant; tree verified healthy; docs de-rotted; plan v2 in progress
 
 **Phase:** Plan 1.5 prep. Unchanged in substance from Sat, 06 Jun 2026: Task 12a spec is locked, plan v1
 is superseded, plan v2 is the active work. Nothing was committed between Sat, 06 Jun 2026 and today.
