@@ -15,9 +15,15 @@ name: CI
 #     macOS-specific paths exercised at bench time today).
 #
 # Docs-only commits skip CI entirely via the paths-ignore filter; saves a
-# full macOS-job set per BACKLOG/memory housekeeping push.
+# full macOS-job set per BACKLOG/memory housekeeping push. The trade-off is
+# that a long run of docs-only commits leaves the pipeline unexercised: CI
+# went 79 days without a run between Fri, 05 Jun 2026 and Sun, 24 Aug 2026
+# because every commit in between touched only docs/. workflow_dispatch below
+# exists so the pipeline can be re-validated on demand after a dormant spell,
+# without inventing a throwaway code change to defeat paths-ignore.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
