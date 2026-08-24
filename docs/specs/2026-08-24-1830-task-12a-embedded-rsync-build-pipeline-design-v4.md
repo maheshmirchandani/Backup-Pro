@@ -1,10 +1,10 @@
 ---
-title: FlashBackup Task 12a Design - Embedded GNU rsync 3.4.1 Build Pipeline
-created: 2026-06-06
-last_modified: 2026-06-06
+title: FlashBackup Task 12a Design v4 - Embedded GNU rsync 3.4.1 Build Pipeline
+created: 2026-08-24
+last_modified: 2026-08-24
 author: Mahesh Mirchandani
-status: SUPERSEDED on Mon, 24 Aug 2026 by docs/specs/2026-08-24-1830-task-12a-embedded-rsync-build-pipeline-design-v4.md (seven factual errors corrected)
-supersedes: none
+status: draft (v4: seven factual corrections from empirical verification)
+supersedes: docs/specs/2026-06-06-1839-task-12a-embedded-rsync-build-pipeline-design.md
 ---
 
 # Task 12a: Embedded GNU rsync 3.4.1 Build Pipeline Design
@@ -45,16 +45,25 @@ This spec is the round-2 multi-hat review revision. Round 1 found 9 Critical + 2
 The embedded rsync is built with optional features disabled at configure time:
 
 ```
+ac_cv_search_iconv_open=no \
+ac_cv_search_libiconv_open=no \
+ac_cv_func_iconv_open=no \
 ./configure \
     --disable-openssl \
     --disable-zstd \
     --disable-lz4 \
-    --disable-xxhash
+    --disable-xxhash \
+    --disable-iconv-open \
+    --disable-iconv
 ```
+
+**v4 correction.** v3 listed only the four `--disable-*` flags. That build links `libiconv.2.dylib` and `libcharset.1.dylib`, failing AC-12a-3. The two extra flags plus the three `ac_cv_*` cache-variable overrides are required to suppress `AC_SEARCH_LIBS(iconv_open, iconv)`, which otherwise runs before the `AC_ARG_ENABLE` and appends `-liconv` regardless. Verified Mon, 24 Aug 2026: `LIBS=` is empty and `otool -L` reports `/usr/lib/libSystem.B.dylib` alone.
+
+**What is given up:** `--iconv` filename charset conversion, reported as `no iconv` in the capability line. FlashBackup never passes `--iconv` and is path-byte transparent by design, so this is a no-op for the product. **What is retained**, confirmed in the built binary's own capability output: `ACLs`, `xattrs`, `inplace`, `append`, `hardlinks`, `symtimes`, 64-bit files and inums.
 
 Links only against `/usr/lib/libSystem.B.dylib`. Final binary size: ~500 KB to 1 MB per architecture, ~1-2 MB universal2.
 
-**Why Minimal:** FlashBackup uses rsync as a local-to-local file copier only. Bundling unused features adds CVE surface and binary size for code we never invoke. The features flashbackup actually uses (--xattrs, --acls, --inplace, --partial, --append) work fine in Minimal because they use libSystem syscalls on macOS, not external libraries. AC-12b-3 below verifies the --xattrs and --acls claim end-to-end.
+**Why Minimal:** FlashBackup uses rsync as a local-to-local file copier only. Bundling unused features adds CVE surface and binary size for code we never invoke. The features flashbackup actually uses work fine in Minimal because they use libSystem syscalls on macOS, not external libraries. AC-12b-3 verifies the `--xattrs` claim end-to-end. **v4 correction:** v3 listed `--acls`, `--inplace` and `--append` among the flags flashbackup uses. It passes none of them; `BuildArgs` emits `-a --partial --xattrs --sparse --hard-links --delete --progress`. See the AC-12b-3 entry for the ACL product gap (Task 12f).
 
 **Reversibility:** if Plan N adds remote backup or `--compress` over network, the build script extends to bundle the needed dep then.
 
@@ -199,7 +208,9 @@ The existing `pathological/` fixture already covers items (a)-(f) of round-1's l
 - (g) **xattr-bearing file** `xattr-target.txt` — `mkfixtures.sh` writes content + immediately writes `xattr -w user.flashbackup-test "smoke-value-$(date +%s)" xattr-target.txt` at the final location (no copy/tar/mv after — preserves xattr per QA N1).
 - (h) **ACL-bearing file** `acl-target.txt` — `mkfixtures.sh` writes content + records `$(whoami)` to a sidecar file `acl-target.user` + applies `chmod +a "user:$(whoami) allow read" acl-target.txt`. The sidecar file is consumed by 12b-B for the recorded-user comparison; cleanup must remove the ACL before `t.TempDir()` removal else macOS may refuse the unlink.
 
-`pathological/MANIFEST.txt` is amended to document (g) and (h). The `pathological/_MatchesManifest` tripwire test (introduced in Task 42a) re-baselines on the extended fixture.
+`pathological/MANIFEST.txt` is amended to document (g).
+
+**v4 correction.** v3 stated that a `pathological/_MatchesManifest` tripwire test exists and would re-baseline. **No such test exists.** `test/e2e/helpers_test.go` defines only `TestFixtureTreeSHA256_TinyMatchesManifest` and `TestFixtureTreeSHA256_RealisticMatchesManifest`. The `SHA256-of-tree` line in `pathological/MANIFEST.txt` has never been asserted by anything: it is a comment, not a check. The recorded value `d902015f...` does reproduce exactly (verified Mon, 24 Aug 2026), so the task is to ADD the missing tripwire, not to re-baseline an existing one.
 
 12b-B's "tiny fixture" reference uses `pathological/` post-extension. NO new `test/fixtures/12b-b/` directory is created.
 
@@ -330,8 +341,15 @@ build_arch() {
         --disable-zstd \
         --disable-lz4 \
         --disable-xxhash \
-        --build="${arch}-apple-darwin" \
         --host="${arch}-apple-darwin")
+    # v4 correction: --build is NOT passed. In autoconf, --build names the
+    # machine you compile ON. Setting build == host keeps cross_compiling=no,
+    # so configure EXECUTES its conftest binary. Verified Mon, 24 Aug 2026
+    # against rsync-3.4.1/configure.sh:1244-1250 and by running both shapes:
+    # with --build the log reads "checking whether we are cross compiling...
+    # no", and on a host that cannot execute the target binary configure
+    # aborts with "cannot run C compiled programs". Passing --host alone
+    # yields "cross compiling... yes" and exit 0.
 
     (cd "${build_dir}" && make -j"$(sysctl -n hw.ncpu)")
 }
@@ -414,7 +432,23 @@ The `var embeddedRsync []byte` declaration is **removed from `internal/rsync/rsy
 
 The rest of `rsync.go` is untouched: `EmbeddedSHA256()`, `EnsureExtracted()`, the SHA256 verify-from-disk fast path, tmp+rename atomicity.
 
-**Implementer audit at task start** (round-2 carryover from CISO Minor 5 / Hacker M8): confirm `EnsureExtracted` (a) creates the tmp file with `O_EXCL` under a 0700 dir, (b) re-verifies SHA256 of the file AFTER rename, (c) applies `chflags uchg` AFTER rename. These properties make the SHA-keyed extract path's integrity guarantee load-bearing. Document the audit result inline in `rsync.go` doc comment if changes were needed.
+**Implementer audit: COMPLETED Mon, 24 Aug 2026.** v3 asserted three properties of `EnsureExtracted`. Two were wrong. Findings against `internal/rsync/rsync.go`:
+
+| v3 assumed | Actual | Action |
+|---|---|---|
+| (a) tmp created with `O_EXCL` under a 0700 dir | Dir is 0700. Open is `O_CREATE\|O_TRUNC\|O_WRONLY` on a fixed `rsync.tmp` after a best-effort `os.Remove`. **No `O_EXCL`.** | Fix with `os.CreateTemp` plus an explicit `Chmod(0o500)`. Probed: the chmod does not revoke the live descriptor, so write/sync/close/reopen all succeed. |
+| (b) SHA256 re-verified AFTER rename | Verified BEFORE the rename. | Keep. Verify-then-atomically-rename carries the same guarantee without a second full read. Document inline. |
+| (c) `chflags uchg` applied AFTER rename | True. | No change. |
+
+**Fourth finding, not anticipated by v3: the immutable flag makes a corrupted extraction unrecoverable.**
+
+`EnsureExtracted` sets `UF_IMMUTABLE` on the extracted binary after rename, and its own re-extract path then cannot replace that file. Verified Mon, 24 Aug 2026: `rename()` over a `uchg` target fails `Operation not permitted`, and `unlink()` of a `uchg` file fails the same way. `grep -rn "Chflags" --include="*.go" internal/ cmd/` outside tests returns exactly one call site, `internal/rsync/chflags_darwin.go:23`, which SETS the flag. **No production code ever clears it.**
+
+Consequence: if the extracted binary is corrupted (a failing USB, or anyone with write access to `<USB>/.flashbackup/bin/<sha>/` writing garbage and setting `uchg`), the SHA mismatch sends `EnsureExtracted` down the re-extract path, the rename fails, and every subsequent run fails with no recovery the user can discover or perform. `rm -rf` of the FlashBackup directory also fails. This is an attacker-reachable denial of service against a specific USB stick, and it grows more likely with Task 12a because the payload goes from 342 bytes to 1 to 2 MB.
+
+**Required fix, tracked as Task 12g:** before the rename, best-effort clear the flag on any existing `extractPath` (behind the existing darwin/other build-tag split) and re-attempt. Add a test that pre-creates an immutable wrong-content `extractPath` and asserts recovery; that test fails against today's code, which is its positive control.
+
+Any replacement of the fixed tmp name must preserve orphan cleanup: the current `os.Remove(tmpPath)` self-heals a crashed extract, and randomised names would otherwise strand a 1 to 2 MB file per crash on a USB volume.
 
 ### 5.3 Makefile additions
 
@@ -545,7 +579,12 @@ jobs:
           draft: true
           body: |
             ## v${{ github.ref_name }}
-            SHA256: ${{ env.FLASHBACKUP_SHA256 }}
+            SHA256: ${{ steps.sha.outputs.value }}
+            # v4 correction: v3 referenced env.FLASHBACKUP_SHA256, which
+            # nothing in the workflow ever set, so the published release
+            # notes would have carried an empty SHA on the exact artefact
+            # users are told to verify. The value now comes from a step
+            # output written by the "Compute artifact SHA256" step.
             Provenance: see attestation tab.
           files: |
             flashbackup
@@ -643,7 +682,12 @@ The current v3 spec's step order (build → 12b-B → SHA256 → attestation →
 
 1. **AC-12a-1**: `scripts/build-rsync.sh` produces `internal/rsync/bin/rsync.universal2` from a clean checkout in <5 minutes on M1 Max. (Wall-clock target; not asserted in CI but documented.)
 2. **AC-12a-2**: `file internal/rsync/bin/rsync.universal2` reports `Mach-O universal binary with 2 architectures: [x86_64] [arm64]`.
-3. **AC-12a-3**: `otool -L -arch arm64` and `otool -L -arch x86_64` both report only `/usr/lib/libSystem.B.dylib`.
+3. **AC-12a-3 (UNCHANGED, and achievable)**: `otool -L -arch arm64` and `otool -L -arch x86_64` both report only `/usr/lib/libSystem.B.dylib`, and report at least one entry per architecture so that malformed `otool` output cannot pass vacuously.
+
+   **v4 note.** The default four-flag build does NOT satisfy this. Built Mon, 24 Aug 2026 with exactly the v3 flags, rsync 3.4.1 links `libiconv.2.dylib` and `libcharset.1.dylib` alongside libSystem, because `configure.ac`'s `AC_SEARCH_LIBS(iconv_open, iconv)` runs unconditionally and appends `-liconv`. `--disable-iconv` alone does not help: the search runs before the `AC_ARG_ENABLE`.
+
+   The criterion is nevertheless achievable, and is kept, because widening the allowlist would convert a real supply-chain control into decoration: it would then also wave through an unintended Homebrew `libpopt` or `libz` link on a runner that happens to have those headers. The configure invocation in Section 5.1 is corrected instead. Verified Mon, 24 Aug 2026 with the corrected invocation: `LIBS=` empty, `otool` reports libSystem alone, and the resulting binary retains every capability FlashBackup uses.
+
 4. **AC-12a-4**: `./internal/rsync/bin/rsync.universal2 --version` reports `rsync  version 3.4.1` on both arm64 and x86_64 macOS hosts.
 5. **AC-12a-5**: `make build-real-rsync` produces a flashbackup binary that, against the extended-pathological fixture with no env override, completes a backup with exit 0, externally-verified content equality, xattr preservation, and ACL preservation.
 6. **AC-12a-6**: `make build` (existing, unchanged) still produces a flashbackup binary that embeds the placeholder.
@@ -653,9 +697,15 @@ The current v3 spec's step order (build → 12b-B → SHA256 → attestation →
 
 **Task 12b:**
 
-10. **AC-12b-1**: `placeholder_rejection_test.go` passes under default build; asserts exit 1 + exit status `partial` + 0 bytes + `PLACEHOLDER rsync` marker in rsync.log.
+10. **AC-12b-1**: `placeholder_rejection_test.go` passes under default build; asserts exit 1 + exit status `partial` + `bytes_transferred == 0` + `files_succeeded == 0` + `PLACEHOLDER rsync` marker in rsync.log.
+
+    **v4 note.** `bytes_transferred` is not currently written to `runs.ndjson`, but the VALUE already exists: `internal/runner/t2_transfer.go:93` declares `BytesTransferred int64` on `T2Result`, populated from the rsync progress parser and covered by `t2_transfer_test.go:257`. `runner.go` captures `t2res` and uses only `RsyncLogPath` from it, so the counter is discarded before serialisation. A new **Task 12e** plumbs it through: one field on `T5Input`, one on `state.FinishedRun`, two assignments. Do NOT weaken this criterion to a files-based substitute; fix the four lines instead. Had this number been present, the placeholder defect would have been visible as `bytes_transferred: 0` in the first dogfood run rather than requiring a physical USB stick to discover.
 11. **AC-12b-2 (externally-verified content equality)**: `embedded_real_rsync_test.go` asserts source SHA256 (via `internal/hash.StreamSHA256`) equals dest SHA256 (via `exec.Command("/usr/bin/shasum", "-a", "256", destPath)`) for every fixture file. The dest hash MUST come from an external subprocess, not from any function in the flashbackup binary.
-12. **AC-12b-3 (xattr/ACL end-to-end)**: extended-pathological fixture includes files (g) and (h); 12b-B asserts xattr `user.flashbackup-test` survives on dest, ACL entry for the gen-time-recorded user survives on dest (compared by content semantics, not hardcoded string).
+12. **AC-12b-3 (xattr end-to-end; ACL REMOVED in v4)**: extended-pathological fixture includes file (g); 12b-B asserts xattr `user.flashbackup-test` survives on dest.
+
+    **v4 correction, and a product gap.** v3 required end-to-end ACL survival. FlashBackup never passes `--acls`. `internal/rsync/wrapper.go` defines `Options` with no ACL field, and `BuildArgs` emits only `-a --partial --xattrs --sparse --hard-links --delete --progress`; `grep -rni "acls" --include="*.go" internal/ cmd/` returns nothing outside tests. GNU rsync's `-a` is `-rlptgoD` and does not carry ACLs. Verified end-to-end Mon, 24 Aug 2026: after a real backup the source carried `user:<name> allow read` and the destination copy carried no ACL, while the xattr survived. A control run with `--acls` added preserved it.
+
+    **ACLs are therefore silently dropped by every backup FlashBackup has ever taken.** Whether that is acceptable is a product decision, not a test-scope decision. It is removed from Task 12a and raised as **Task 12f** (decide whether to add an `ACLs` option, emit `--acls`, and set it in `t2_transfer.go`). Task 12a must not assert a behaviour the product does not implement.
 13. **AC-12b-4 (script negative tests)**: all four negative scenarios (tarball mismatch, missing prereq, corrupted cache, partial-make) exit 1 with expected error markers; pass in CI.
 
 **CI plumbing:**

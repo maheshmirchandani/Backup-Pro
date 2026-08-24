@@ -115,8 +115,11 @@ itself evidence.
 3. **`make coverage` swallows test failures.** Each package runs under `|| true`, so a compile error
    or panic shows up only as a missing or empty profile, reported as `(no statements; vacuously
    covered)`. Read the output; do not just check the exit code.
-4. **`gofmt -l` is not enough.** CI runs the `-s` simplifier variant, which rewrites list-indent
-   shapes bare `gofmt` accepts. Always `gofmt -s -l`.
+4. **`gofmt -s -l` exits 0 even when files are unformatted.** It prints the offending paths and
+   returns success, so `gofmt -s -l . && next-command` NEVER fails on drift. Verified Mon, 24 Aug
+   2026 against a deliberately misformatted file. Use `test -z "$(gofmt -s -l .)"` in any gate
+   chain. Separately, bare `gofmt -l` accepts list-indent shapes the `-s` simplifier rewrites, and
+   CI runs the `-s` variant, so always pass `-s` as well.
 5. **Three e2e tests currently `t.Skip` by design**, with their future-state assertions already
    written below the skip: `crash_resume_test.go` (waits on Task 50a), `delete_flag_test.go` (waits
    on Task 51c), and the AC-13b case (waits on Task 50b). They flip on automatically when those
